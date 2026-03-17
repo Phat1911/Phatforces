@@ -129,6 +129,12 @@ func (h *VideoHandler) Upload(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("db insert failed: %v", err)})
 		return
 	}
+	// Clear the uploader's feed queue so the next ForYou scroll rebuilds fresh.
+	// This prevents the newly posted video from appearing repeatedly due to a
+	// stale queue that was built before the video existed.
+	if h.rdb != nil {
+		h.rdb.Del(c.Request.Context(), "feed:queue:"+fmt.Sprintf("%v", userID))
+	}
 	c.JSON(http.StatusCreated, video)
 }
 
@@ -228,7 +234,8 @@ func (h *VideoHandler) Unlike(c *gin.Context) {
 }
 
 func (h *VideoHandler) RecordView(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userIDRaw, _ := c.Get("user_id")
+	userID := fmt.Sprintf("%v", userIDRaw)
 	videoID := c.Param("id")
 	var req struct {
 		WatchTime    float64 `json:"watch_time"`
@@ -236,12 +243,223 @@ func (h *VideoHandler) RecordView(c *gin.Context) {
 		Replayed     bool    `json:"replayed"`
 	}
 	c.ShouldBindJSON(&req)
+
+	// Normalize watch_percent: frontend sends 0-100, recommender expects 0.0-1.0.
+	// Accept either format: if value > 1.0 assume it's a percentage and divide by 100.
+	watchPct := req.WatchPercent
+	if watchPct > 1.0 {
+		watchPct = watchPct / 100.0
+	}
+	if watchPct > 1.0 {
+		watchPct = 1.0
+	}
+
 	h.db.Exec(`
 		INSERT INTO video_views (user_id, video_id, watch_time, watch_percent, replayed)
 		VALUES ($1, $2, $3, $4, $5)
-	`, userID, videoID, req.WatchTime, req.WatchPercent, req.Replayed)
+	`, userID, videoID, req.WatchTime, watchPct, req.Replayed)
 	h.db.Exec(`UPDATE videos SET view_count = view_count + 1 WHERE id = $1`, videoID)
+
+	// Send real-time signal to recommender feature store (non-blocking goroutine)
+	var hashtags []string
+	h.db.QueryRow(`SELECT COALESCE(hashtags, '{}') FROM videos WHERE id = $1`, videoID).Scan(pq.Array(&hashtags))
+	SendViewSignal(userID, videoID, watchPct, hashtags)
+
 	c.JSON(http.StatusOK, gin.H{"message": "recorded"})
+}
+
+func (h *VideoHandler) SaveVideo(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	videoID := c.Param("id")
+	if len(videoID) != 36 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid video id"})
+		return
+	}
+
+	var count int
+	err := h.db.QueryRow(`
+		WITH ins AS (
+			INSERT INTO saved_videos (user_id, video_id) VALUES ($1, $2)
+			ON CONFLICT DO NOTHING
+			RETURNING 1
+		)
+		SELECT COUNT(*) FROM ins
+	`, userID, videoID).Scan(&count)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "save failed"})
+		return
+	}
+	if count > 0 {
+		h.db.Exec(`UPDATE videos SET save_count = save_count + 1 WHERE id = $1`, videoID)
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "saved", "inserted": count > 0})
+}
+
+func (h *VideoHandler) UnsaveVideo(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	videoID := c.Param("id")
+	if len(videoID) != 36 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid video id"})
+		return
+	}
+
+	result, err := h.db.Exec(`DELETE FROM saved_videos WHERE user_id=$1 AND video_id=$2`, userID, videoID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unsave failed"})
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "not saved"})
+		return
+	}
+	h.db.Exec(`UPDATE videos SET save_count = GREATEST(save_count - 1, 0) WHERE id = $1`, videoID)
+	c.JSON(http.StatusOK, gin.H{"message": "unsaved"})
+}
+
+func (h *VideoHandler) GetSavedVideos(c *gin.Context) {
+	currentUserIDRaw, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	currentUserID := fmt.Sprintf("%v", currentUserIDRaw)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit := 20
+	offset := (page - 1) * limit
+
+	rows, err := h.db.Query(`
+		SELECT v.id, v.user_id, v.title, v.description, v.video_url, v.thumbnail_url,
+			v.duration, v.view_count, v.like_count, v.comment_count, v.share_count,
+			v.hashtags, v.created_at,
+			u.username, u.display_name, u.avatar_url, u.is_verified, u.follower_count
+		FROM saved_videos s
+		JOIN videos v ON v.id = s.video_id
+		JOIN users u ON u.id = v.user_id
+		WHERE s.user_id = $1 AND v.is_published = true
+		ORDER BY s.created_at DESC
+		LIMIT $2 OFFSET $3
+	`, currentUserID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get saved videos"})
+		return
+	}
+	defer rows.Close()
+
+	var videos []models.Video
+	for rows.Next() {
+		var v models.Video
+		var a models.User
+		if err := rows.Scan(&v.ID, &v.UserID, &v.Title, &v.Description, &v.VideoURL, &v.ThumbnailURL,
+			&v.Duration, &v.ViewCount, &v.LikeCount, &v.CommentCount, &v.ShareCount,
+			pq.Array(&v.Hashtags), &v.CreatedAt,
+			&a.Username, &a.DisplayName, &a.AvatarURL, &a.IsVerified, &a.FollowerCount); err != nil {
+			continue
+		}
+		a.ID = v.UserID
+		v.Author = &a
+		v.IsSaved = true
+		var likeCount int
+		h.db.QueryRow(`SELECT COUNT(*) FROM video_likes WHERE user_id=$1 AND video_id=$2`,
+			currentUserID, v.ID).Scan(&likeCount)
+		v.IsLiked = likeCount > 0
+		videos = append(videos, v)
+	}
+	c.JSON(http.StatusOK, gin.H{"videos": videos, "page": page})
+}
+
+
+// ShareVideo records that the current user shared this video.
+// Increments share_count, upserts into shared_videos, returns updated count.
+func (h *VideoHandler) ShareVideo(c *gin.Context) {
+	userIDRaw, _ := c.Get("user_id")
+	userID := fmt.Sprintf("%v", userIDRaw)
+	videoID := c.Param("id")
+	if len(videoID) != 36 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid video id"})
+		return
+	}
+
+	// Upsert into shared_videos (ignore if already shared)
+	var inserted int
+	h.db.QueryRow(`
+		WITH ins AS (
+			INSERT INTO shared_videos (user_id, video_id)
+			VALUES ($1, $2)
+			ON CONFLICT DO NOTHING
+			RETURNING 1
+		)
+		SELECT COUNT(*) FROM ins
+	`, userID, videoID).Scan(&inserted)
+
+	// Always increment share_count (each click = a share event)
+	h.db.Exec(`UPDATE videos SET share_count = share_count + 1 WHERE id = $1`, videoID)
+
+	var shareCount int
+	h.db.QueryRow(`SELECT share_count FROM videos WHERE id = $1`, videoID).Scan(&shareCount)
+	c.JSON(http.StatusOK, gin.H{"message": "shared", "share_count": shareCount})
+}
+
+// GetSharedVideos returns videos the current user has shared.
+func (h *VideoHandler) GetSharedVideos(c *gin.Context) {
+	currentUserIDRaw, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	currentUserID := fmt.Sprintf("%v", currentUserIDRaw)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit := 20
+	offset := (page - 1) * limit
+
+	rows, err := h.db.Query(`
+		SELECT v.id, v.user_id, v.title, v.description, v.video_url, v.thumbnail_url,
+			v.duration, v.view_count, v.like_count, v.comment_count, v.share_count,
+			v.save_count, v.hashtags, v.created_at,
+			u.username, u.display_name, u.avatar_url, u.is_verified, u.follower_count
+		FROM shared_videos s
+		JOIN videos v ON v.id = s.video_id
+		JOIN users u ON u.id = v.user_id
+		WHERE s.user_id = $1 AND v.is_published = true
+		ORDER BY s.created_at DESC
+		LIMIT $2 OFFSET $3
+	`, currentUserID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed"})
+		return
+	}
+	defer rows.Close()
+
+	var videos []models.Video
+	for rows.Next() {
+		var v models.Video
+		var a models.User
+		if err := rows.Scan(&v.ID, &v.UserID, &v.Title, &v.Description, &v.VideoURL, &v.ThumbnailURL,
+			&v.Duration, &v.ViewCount, &v.LikeCount, &v.CommentCount, &v.ShareCount, &v.SaveCount,
+			pq.Array(&v.Hashtags), &v.CreatedAt,
+			&a.Username, &a.DisplayName, &a.AvatarURL, &a.IsVerified, &a.FollowerCount); err != nil {
+			continue
+		}
+		a.ID = v.UserID
+		v.Author = &a
+		var likeCount int
+		h.db.QueryRow(`SELECT COUNT(*) FROM video_likes WHERE user_id=$1 AND video_id=$2`,
+			currentUserID, v.ID).Scan(&likeCount)
+		v.IsLiked = likeCount > 0
+		videos = append(videos, v)
+	}
+	if videos == nil {
+		videos = []models.Video{}
+	}
+	c.JSON(http.StatusOK, gin.H{"videos": videos, "page": page})
 }
 
 func (h *VideoHandler) GetUserVideos(c *gin.Context) {

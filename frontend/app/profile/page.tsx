@@ -10,6 +10,8 @@ export default function ProfilePage() {
   const { user, setAuth, clearAuth } = useAuthStore();
   const [profile, setProfile] = useState<any>(null);
   const [videos, setVideos] = useState<any[]>([]);
+  const [savedVideos, setSavedVideos] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'videos'|'saved'>('videos');
   const [stats, setStats] = useState<any>(null);
   const router = useRouter();
 
@@ -17,25 +19,24 @@ export default function ProfilePage() {
     const token = Cookies.get('photcot_token');
     if (!token) { router.push('/'); return; }
 
-    // Rehydrate store if needed by calling /users/me equivalent via login check
     const loadProfile = async () => {
       try {
-        // Get current user info by decoding token (JWT payload is base64)
         const payload = JSON.parse(atob(token.split('.')[1]));
         const username = payload.username;
         const userId = payload.user_id;
 
-        const [profileRes, videosRes, statsRes] = await Promise.all([
+        const [profileRes, videosRes, statsRes, savedRes] = await Promise.all([
           api.get(`/users/${username}`),
           api.get(`/u/${userId}/videos`),
           api.get('/monetization/stats'),
+          api.get('/videos/saved').catch(() => ({ data: { videos: [] } })),
         ]);
 
         setProfile(profileRes.data);
         setVideos(videosRes.data.videos || []);
+        setSavedVideos(savedRes.data.videos || []);
         setStats(statsRes.data);
 
-        // Sync store
         if (!user) setAuth(profileRes.data, token);
       } catch {
         router.push('/');
@@ -113,26 +114,38 @@ export default function ProfilePage() {
         )}
 
         <div className="px-4">
-          <h3 className="text-white font-bold mb-3">Videos ({videos.length})</h3>
-          {videos.length === 0 ? (
-            <div className="text-center text-gray-400 py-10">
-              <p className="text-4xl mb-2">📹</p>
-              <p>No videos yet</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-1">
-              {videos.map((v: any) => (
-                <div key={v.id} className="aspect-[9/16] bg-[#1F2030] rounded-md overflow-hidden relative group">
-                  {v.thumbnail_url
-                    ? <img src={getThumbUrl(v.thumbnail_url)} className="w-full h-full object-cover" alt=""/>
-                    : <div className="w-full h-full flex items-center justify-center"><span className="text-2xl">🎬</span></div>
-                  }
-                  <div className="absolute bottom-1 left-1 text-white text-xs bg-black/70 px-1 rounded">
-                    👁 {v.view_count}
+          {/* Tab Bar */}
+          <div className="flex border-b border-[#2D2F3E] mb-4">
+            <button onClick={() => setActiveTab('videos')}
+              className={"flex-1 py-2 text-sm font-semibold transition-colors border-b-2 " + (activeTab === 'videos' ? 'text-white border-[#FE2C55]' : 'text-gray-500 border-transparent hover:text-gray-300')}>
+              Videos ({videos.length})
+            </button>
+            <button onClick={() => setActiveTab('saved')}
+              className={"flex-1 py-2 text-sm font-semibold transition-colors border-b-2 " + (activeTab === 'saved' ? 'text-white border-[#FE2C55]' : 'text-gray-500 border-transparent hover:text-gray-300')}>
+              Saved ({savedVideos.length})
+            </button>
+          </div>
+
+          {/* Tab Content */}
+          {activeTab === 'videos' && (
+            videos.length === 0
+              ? <div className="text-center text-gray-400 py-10"><p className="text-4xl mb-2"></p><p>No videos yet</p></div>
+              : <div className="grid grid-cols-3 gap-1">{videos.map((v: any) => (
+                  <div key={v.id} className="aspect-[9/16] bg-[#1F2030] rounded-md overflow-hidden relative">
+                    {v.thumbnail_url ? <img src={getThumbUrl(v.thumbnail_url)} className="w-full h-full object-cover" alt=""/> : <div className="w-full h-full flex items-center justify-center"><span className="text-2xl"></span></div>}
+                    <div className="absolute bottom-1 left-1 text-white text-xs bg-black/70 px-1 rounded"> {v.view_count}</div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}</div>
+          )}
+          {activeTab === 'saved' && (
+            savedVideos.length === 0
+              ? <div className="text-center text-gray-400 py-10"><p className="text-4xl mb-2"></p><p>No saved videos</p></div>
+              : <div className="grid grid-cols-3 gap-1">{savedVideos.map((v: any) => (
+                  <div key={v.id} className="aspect-[9/16] bg-[#1F2030] rounded-md overflow-hidden relative">
+                    {v.thumbnail_url ? <img src={getThumbUrl(v.thumbnail_url)} className="w-full h-full object-cover" alt=""/> : <div className="w-full h-full flex items-center justify-center"><span className="text-2xl"></span></div>}
+                    <div className="absolute bottom-1 left-1 text-white text-xs bg-black/70 px-1 rounded"> {v.view_count}</div>
+                  </div>
+                ))}</div>
           )}
         </div>
       </div>

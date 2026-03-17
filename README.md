@@ -120,6 +120,33 @@ Use the included startup script to start all services at once:
 ```bash
 bash ~/start_photcot.sh
 ```
+## Production Deployment
+
+Production setup (AWS + Cloudflare + CI/CD) is documented in:
+
+- `docs/DEPLOYMENT_AWS_CLOUDFLARE.md`
+
+Infrastructure and deployment artifacts added to this repository:
+
+- `backend/Dockerfile`
+- `frontend/Dockerfile`
+- `deploy/docker-compose.prod.yml`
+- `deploy/nginx/phatforces.conf`
+- `.github/workflows/ci.yml`
+- `.github/workflows/deploy-aws.yml`
+
+For first-time EC2 setup:
+
+```bash
+chmod +x deploy/first_bootstrap.sh deploy/deploy.sh
+./deploy/first_bootstrap.sh
+```
+
+## AI Continuation Guide
+
+To help future AI agents continue safely, see:
+
+- `docs/AI_HANDOFF.md`
 
 ## API Endpoints
 

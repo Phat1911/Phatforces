@@ -7,9 +7,13 @@ import Cookies from 'js-cookie';
 
 interface Props { onClose: () => void; }
 
+type RegisterStep = 'form' | 'otp';
+
 export default function AuthModal({ onClose }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [registerStep, setRegisterStep] = useState<RegisterStep>('form');
   const [form, setForm] = useState({ username: '', email: '', password: '' });
+  const [otpCode, setOtpCode] = useState('');
   const [loading, setLoading] = useState(false);
   const { setAuth } = useAuthStore();
 
@@ -33,7 +37,8 @@ export default function AuthModal({ onClose }: Props) {
     }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+  // Step 1: validate form and send OTP
+  const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.password.length < 6) {
       toast.error('Password must be at least 6 characters');
@@ -41,6 +46,25 @@ export default function AuthModal({ onClose }: Props) {
     }
     setLoading(true);
     try {
+      await api.post('/auth/send-otp', { email: form.email });
+      toast.success(`Verification code sent to ${form.email}`);
+      setRegisterStep('otp');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to send verification code';
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 2: verify OTP then register
+  const handleVerifyAndRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      // Verify the OTP first
+      await api.post('/auth/verify-otp', { email: form.email, code: otpCode });
+      // OTP verified - now register
       const res = await api.post('/auth/register', {
         username: form.username,
         email: form.email,
@@ -54,7 +78,7 @@ export default function AuthModal({ onClose }: Props) {
       onClose();
       window.location.reload();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Registration failed';
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Verification failed';
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -63,7 +87,9 @@ export default function AuthModal({ onClose }: Props) {
 
   const switchMode = (m: 'login' | 'register') => {
     setMode(m);
+    setRegisterStep('form');
     setForm({ username: '', email: '', password: '' });
+    setOtpCode('');
   };
 
   return (
@@ -72,7 +98,7 @@ export default function AuthModal({ onClose }: Props) {
         <div className="text-center mb-6">
           <h1 className="text-3xl font-black text-[#FE2C55] mb-1">Phatforces</h1>
           <p className="text-gray-400 text-sm">
-            {mode === 'login' ? 'Log in to continue' : 'Create your account'}
+            {mode === 'login' ? 'Log in to continue' : registerStep === 'form' ? 'Create your account' : 'Verify your email'}
           </p>
         </div>
 
@@ -93,8 +119,8 @@ export default function AuthModal({ onClose }: Props) {
           </form>
         )}
 
-        {mode === 'register' && (
-          <form onSubmit={handleRegister} className="flex flex-col gap-3">
+        {mode === 'register' && registerStep === 'form' && (
+          <form onSubmit={handleSendOTP} className="flex flex-col gap-3">
             <input type="text" placeholder="Username" value={form.username}
               onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
               className="bg-[#161823] border border-[#2D2F3E] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#FE2C55] transition-colors"
@@ -109,7 +135,28 @@ export default function AuthModal({ onClose }: Props) {
               required minLength={6} />
             <button type="submit" disabled={loading}
               className="bg-[#FE2C55] text-white font-bold py-3 rounded-xl hover:bg-[#e0193f] transition-colors disabled:opacity-50 mt-1 text-sm">
-              {loading ? 'Creating account...' : 'Create Account'}
+              {loading ? 'Sending code...' : 'Send Verification Code'}
+            </button>
+          </form>
+        )}
+
+        {mode === 'register' && registerStep === 'otp' && (
+          <form onSubmit={handleVerifyAndRegister} className="flex flex-col gap-3">
+            <p className="text-gray-400 text-sm text-center">
+              We sent a 6-digit code to<br />
+              <span className="text-white font-semibold">{form.email}</span>
+            </p>
+            <input type="text" placeholder="Enter 6-digit code" value={otpCode}
+              onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              className="bg-[#161823] border border-[#2D2F3E] rounded-xl px-4 py-3 text-white text-sm text-center tracking-[0.5em] text-lg focus:outline-none focus:border-[#FE2C55] transition-colors"
+              required maxLength={6} minLength={6} autoFocus />
+            <button type="submit" disabled={loading || otpCode.length !== 6}
+              className="bg-[#FE2C55] text-white font-bold py-3 rounded-xl hover:bg-[#e0193f] transition-colors disabled:opacity-50 mt-1 text-sm">
+              {loading ? 'Verifying...' : 'Verify & Create Account'}
+            </button>
+            <button type="button" onClick={() => { setRegisterStep('form'); setOtpCode(''); }}
+              className="text-gray-400 text-sm hover:text-white transition-colors">
+              Back
             </button>
           </form>
         )}

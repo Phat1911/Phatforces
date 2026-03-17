@@ -33,8 +33,18 @@ type Video struct {
 	ShareCount   int       `json:"share_count"`
 	Hashtags     []string  `json:"hashtags"`
 	IsLiked      bool      `json:"is_liked,omitempty"`
+	IsSaved      bool      `json:"is_saved,omitempty"`
+	SaveCount    int       `json:"save_count"`
 	IsPublished  bool      `json:"is_published"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+// SavedVideo represents a user's saved/bookmarked video
+type SavedVideo struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	VideoID   string    `json:"video_id"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Comment struct {

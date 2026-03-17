@@ -25,7 +25,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	err := h.db.QueryRow(`
 		SELECT id, username, display_name, bio, avatar_url, is_verified,
 			follower_count, following_count, total_likes, created_at
-		FROM users WHERE username = $1
+		FROM users WHERE username = $1 AND is_admin = false
 	`, username).Scan(
 		&user.ID, &user.Username, &user.DisplayName, &user.Bio,
 		&user.AvatarURL, &user.IsVerified, &user.FollowerCount,
@@ -122,7 +122,7 @@ func (h *UserHandler) GetFollowers(c *gin.Context) {
 	rows, err := h.db.Query(`
 		SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_verified, u.follower_count
 		FROM follows f JOIN users u ON u.id = f.follower_id
-		WHERE f.following_id = $1 ORDER BY f.created_at DESC LIMIT 50
+		WHERE f.following_id = $1 AND u.is_admin = false ORDER BY f.created_at DESC LIMIT 50
 	`, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed"})
@@ -143,7 +143,7 @@ func (h *UserHandler) GetFollowing(c *gin.Context) {
 	rows, err := h.db.Query(`
 		SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_verified, u.follower_count
 		FROM follows f JOIN users u ON u.id = f.following_id
-		WHERE f.follower_id = $1 ORDER BY f.created_at DESC LIMIT 50
+		WHERE f.follower_id = $1 AND u.is_admin = false ORDER BY f.created_at DESC LIMIT 50
 	`, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed"})

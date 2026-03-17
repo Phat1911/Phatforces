@@ -63,6 +63,23 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// Step 2: Require a verified OTP for this email
+	var otpID string
+	err := h.db.QueryRow(
+		`SELECT id FROM email_otps WHERE email=$1 AND verified=TRUE AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1`,
+		req.Email,
+	).Scan(&otpID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email not verified, please verify your email first"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check email verification"})
+		return
+	}
+	// Consume the OTP so it can't be reused
+	h.db.Exec("DELETE FROM email_otps WHERE id=$1", otpID)
+
 	// Hash password and create account
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
@@ -85,7 +102,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	token := h.generateToken(user.ID, user.Username)
+	token := h.generateToken(user.ID, user.Username, false)
 	c.JSON(http.StatusCreated, models.AuthResponse{Token: token, User: &user})
 }
 
@@ -98,15 +115,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	var user models.User
 	var passwordHash string
+	var isAdmin bool
 	err := h.db.QueryRow(`
 		SELECT id, username, email, display_name, bio, avatar_url, is_verified,
-			follower_count, following_count, total_likes, created_at, password_hash
+			follower_count, following_count, total_likes, created_at, password_hash, is_admin
 		FROM users WHERE email = $1
 	`, strings.ToLower(strings.TrimSpace(req.Email))).Scan(
 		&user.ID, &user.Username, &user.Email, &user.DisplayName,
 		&user.Bio, &user.AvatarURL, &user.IsVerified,
 		&user.FollowerCount, &user.FollowingCount, &user.TotalLikes, &user.CreatedAt,
-		&passwordHash,
+		&passwordHash, &isAdmin,
 	)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
@@ -118,7 +136,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token := h.generateToken(user.ID, user.Username)
+	token := h.generateToken(user.ID, user.Username, isAdmin)
 	c.JSON(http.StatusOK, models.AuthResponse{Token: token, User: &user})
 }
 
@@ -126,10 +144,11 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "refresh not implemented yet"})
 }
 
-func (h *AuthHandler) generateToken(userID, username string) string {
+func (h *AuthHandler) generateToken(userID, username string, isAdmin bool) string {
 	claims := jwt.MapClaims{
 		"user_id":  userID,
 		"username": username,
+		"is_admin": isAdmin,
 		"exp":      time.Now().Add(24 * time.Hour).Unix(),
 	}
 	token, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(h.cfg.JWTSecret))

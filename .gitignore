@@ -39,3 +39,20 @@ Thumbs.db
 # TypeScript
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# SSL certs (never commit private keys)
+deploy/nginx/ssl/
+*.pem
+*.key
+*.crt
+
+# Prod env (never commit)
+deploy/.env.prod
+
+# Python venv
+recommender_venv/
+__pycache__/
+*.pyc
+
+# Backup files
+*.bak

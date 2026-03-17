@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -8,7 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func Auth(secret string) gin.HandlerFunc {
+func Auth(secret string, db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if header == "" || !strings.HasPrefix(header, "Bearer ") {
@@ -30,6 +31,14 @@ func Auth(secret string) gin.HandlerFunc {
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid claims"})
+			return
+		}
+		userID := fmt.Sprintf("%v", claims["user_id"])
+		// Verify user still exists in DB - catches deleted accounts with valid tokens
+		var exists bool
+		err = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)`, userID).Scan(&exists)
+		if err != nil || !exists {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account not found"})
 			return
 		}
 		c.Set("user_id", claims["user_id"])

@@ -1,10 +1,11 @@
 'use client';
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { api, getVideoUrl, getThumbUrl } from '@/lib/api';
 import { Video } from '@/lib/store';
+import { videoController } from '@/lib/videoController';
 import { AiFillHeart, AiOutlineHeart, AiOutlineComment, AiOutlineShareAlt } from 'react-icons/ai';
 import { BsMusicNote, BsVolumeMute, BsVolumeUp } from 'react-icons/bs';
-import { IoBookmarkOutline, IoClose } from 'react-icons/io5';
+import { IoBookmarkOutline, IoBookmark, IoClose, IoCopyOutline, IoLogoWhatsapp, IoLogoFacebook } from 'react-icons/io5';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import Cookies from 'js-cookie';
@@ -12,76 +13,192 @@ import Cookies from 'js-cookie';
 interface Props { video: Video; isActive: boolean; onAuthRequired: () => void; }
 interface Comment { id: string; content: string; author: { username: string; avatar_url: string }; created_at: string; }
 
-let globalMuted = true;
-
 export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
+  // Memoized callback ref - fires synchronously on DOM insert (before IO can fire).
+  // Guarantees element is in videoController map before activate() is ever called.
+  // Use instanceId as controller key - unique per feed slot, prevents map collision on cycling
+  const ctrlKey = video.instanceId || video.id;
+  const videoCallbackRef = useCallback(videoController.refCallback(ctrlKey), [ctrlKey]);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // combinedRef: keeps local ref for progress bar AND registers with controller
+  const combinedRef = useCallback((el: HTMLVideoElement | null) => {
+    (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
+    videoCallbackRef(el);
+  }, [videoCallbackRef]);
+
   const [liked, setLiked] = useState(video.is_liked);
   const [likeCount, setLikeCount] = useState(video.like_count || 0);
+  const [saved, setSaved] = useState(video.is_saved);
+  const [saveCount, setSaveCount] = useState(video.save_count || 0);
   const [paused, setPaused] = useState(false);
-  const [muted, setMuted] = useState(globalMuted);
+  const [muted, setMuted] = useState(videoController.isMuted());
   const [showComments, setShowComments] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState('');
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [showTime, setShowTime] = useState(false);
+  const seekBarRef = useRef<HTMLDivElement>(null);
+  const isSeekingRef = useRef(false);
   const [likeAnim, setLikeAnim] = useState(false);
+  const [saveAnim, setSaveAnim] = useState(false);
   const [doubleTapHeart, setDoubleTapHeart] = useState(false);
   const lastTapRef = useRef(0);
   const viewRecordedRef = useRef(false);
   const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // isActive drives UI only: mute icon sync, paused reset, view tracking.
+  // Actual play/pause/mute is owned by videoController.activate() called
+  // from IntersectionObserver in page.tsx - synchronous, no React gap.
   useEffect(() => {
-    const v = videoRef.current;
-    if (v) v.muted = muted;
-  }, [muted]);
-
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
+    viewRecordedRef.current = false;
     if (isActive) {
-      v.muted = globalMuted;
-      setMuted(globalMuted);
-      const p = v.play();
-      if (p) p.catch(() => {});
+      setMuted(videoController.isMuted());
       setPaused(false);
+      // Record view after 3s using real watch_percent from the video element
       viewTimerRef.current = setTimeout(() => {
         if (!viewRecordedRef.current && Cookies.get('photcot_token')) {
-          api.post(`/videos/${video.id}/view`, { watch_time: 3, watch_percent: 50 }).catch(() => {});
+          const v = videoRef.current;
+          const dur = v?.duration || 0;
+          const cur = v?.currentTime || 0;
+          const watchPercent = dur > 0 ? Math.round((cur / dur) * 100) : 10;
+          const watchTime = cur > 0 ? Math.round(cur) : 3;
+          api.post(`/videos/${video.id}/view`, { watch_time: watchTime, watch_percent: watchPercent }).catch(() => {});
           viewRecordedRef.current = true;
         }
       }, 3000);
     } else {
-      const p = v.play().catch(() => {});
-      if (p) p.then(() => { v.pause(); v.currentTime = 0; }).catch(() => {});
-      else { v.pause(); v.currentTime = 0; }
+      // On scroll-away: send final view with real watch_percent if not yet recorded
+      const v = videoRef.current;
+      if (!viewRecordedRef.current && Cookies.get('photcot_token') && v && v.duration > 0 && v.currentTime > 1) {
+        const watchPercent = Math.round((v.currentTime / v.duration) * 100);
+        const watchTime = Math.round(v.currentTime);
+        api.post(`/videos/${video.id}/view`, { watch_time: watchTime, watch_percent: watchPercent }).catch(() => {});
+        viewRecordedRef.current = true;
+      }
       setProgress(0);
+      setCurrentTime(0);
+      setDuration(0);
+      setIsSeeking(false);
+      setShowTime(false);
+      setPaused(false);
       if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
     }
     return () => { if (viewTimerRef.current) clearTimeout(viewTimerRef.current); };
   }, [isActive, video.id]);
 
+  // Progress bar update - tracks time and duration
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !isActive) return;
     const update = () => {
-      if (v.duration) setProgress((v.currentTime / v.duration) * 100);
+      if (v.duration && !isSeekingRef.current) {
+        setCurrentTime(v.currentTime);
+        setDuration(v.duration);
+        setProgress((v.currentTime / v.duration) * 100);
+      }
+    };
+    const onLoadedMeta = () => {
+      if (v.duration) setDuration(v.duration);
     };
     v.addEventListener('timeupdate', update);
-    return () => v.removeEventListener('timeupdate', update);
-  }, [isActive]);
+    v.addEventListener('loadedmetadata', onLoadedMeta);
+    return () => {
+      v.removeEventListener('timeupdate', update);
+      v.removeEventListener('loadedmetadata', onLoadedMeta);
+    };
+  }, [isActive]); // isSeeking handled via isSeekingRef to avoid listener churn
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const v = videoRef.current;
-    if (!v) return;
-    const newMuted = !muted;
-    v.muted = newMuted;
-    globalMuted = newMuted;
+    const newMuted = videoController.toggleMute();
     setMuted(newMuted);
   };
 
-  const handleLike = async () => {
+  const fmtTime = (s: number) => {
+    if (!s || isNaN(s)) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  const getSeekPosition = (e: React.MouseEvent | React.TouchEvent): number => {
+    const bar = seekBarRef.current;
+    if (!bar) return 0;
+    const rect = bar.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    return x / rect.width;
+  };
+
+  const handleSeekStart = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    isSeekingRef.current = true;
+    setIsSeeking(true);
+    setShowTime(true);
+    const ratio = getSeekPosition(e as React.MouseEvent);
+    setProgress(ratio * 100);
+    const v = videoRef.current;
+    if (v && v.duration) {
+      const t = ratio * v.duration;
+      setCurrentTime(t);
+      v.currentTime = t;
+    }
+    // Attach document-level drag handlers so seek works outside the narrow bar
+    document.addEventListener('mousemove', handleSeekMoveDoc);
+    document.addEventListener('mouseup', handleSeekEnd);
+    document.addEventListener('touchmove', handleSeekMoveDoc, { passive: true });
+    document.addEventListener('touchend', handleSeekEnd);
+  };
+
+  const handleSeekMove = (e: React.MouseEvent) => {
+    if (!isSeekingRef.current) return;
+    e.stopPropagation();
+    const ratio = getSeekPosition(e);
+    setProgress(ratio * 100);
+    const v = videoRef.current;
+    if (v && v.duration) {
+      const t = ratio * v.duration;
+      setCurrentTime(t);
+      v.currentTime = t;
+    }
+  };
+
+  // Document-level handler for drag outside the seek bar element
+  const handleSeekMoveDoc = (e: MouseEvent | TouchEvent) => {
+    if (!isSeekingRef.current) return;
+    const bar = seekBarRef.current;
+    if (!bar) return;
+    const rect = bar.getBoundingClientRect();
+    const clientX = e instanceof TouchEvent ? e.touches[0]?.clientX ?? 0 : e.clientX;
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const ratio = x / rect.width;
+    setProgress(ratio * 100);
+    const v = videoRef.current;
+    if (v && v.duration) {
+      const t = ratio * v.duration;
+      setCurrentTime(t);
+      v.currentTime = t;
+    }
+  };
+
+  const handleSeekEnd = (e?: React.MouseEvent | MouseEvent | TouchEvent) => {
+    if (e && 'stopPropagation' in e) e.stopPropagation();
+    isSeekingRef.current = false;
+    setIsSeeking(false);
+    setShowTime(false);
+    // Remove document-level drag listeners
+    document.removeEventListener('mousemove', handleSeekMoveDoc);
+    document.removeEventListener('mouseup', handleSeekEnd);
+    document.removeEventListener('touchmove', handleSeekMoveDoc);
+    document.removeEventListener('touchend', handleSeekEnd);
+  };
+
+  const handleLike = useCallback(async () => {
     if (!Cookies.get('photcot_token')) { onAuthRequired(); return; }
     setLikeAnim(true);
     setTimeout(() => setLikeAnim(false), 400);
@@ -94,6 +211,26 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
         setLiked(true); setLikeCount(c => c + 1);
       }
     } catch { toast.error('Failed'); }
+  }, [liked, video.id, onAuthRequired]);
+
+  const handleSave = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!Cookies.get('photcot_token')) { onAuthRequired(); return; }
+    setSaveAnim(true);
+    setTimeout(() => setSaveAnim(false), 400);
+    try {
+      if (saved) {
+        await api.delete(`/videos/${video.id}/save`);
+        setSaved(false);
+        setSaveCount(c => Math.max(0, c - 1));
+        toast.success('Removed from saved');
+      } else {
+        await api.post(`/videos/${video.id}/save`);
+        setSaved(true);
+        setSaveCount(c => c + 1);
+        toast.success('Saved!');
+      }
+    } catch { toast.error('Failed to save'); }
   };
 
   const openComments = async () => {
@@ -119,13 +256,50 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
     } catch { toast.error('Failed to post comment'); }
   };
 
-  const handleShare = () => {
-    navigator.clipboard.writeText(window.location.origin + '?v=' + video.id).catch(() => {});
-    toast.success('Link copied!');
+  const videoShareUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}?v=${video.id}`
+    : `https://phatforces.app?v=${video.id}`;
+
+  // Record share in backend (increments share_count + stores in shared_videos)
+  const recordShare = () => {
+    if (Cookies.get('photcot_token')) {
+      api.post(`/videos/${video.id}/share`).catch(() => {});
+    }
+  };
+
+  const handleCopyLink = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(videoShareUrl);
+      toast.success('Link copied!');
+      recordShare();
+    } catch { toast.error('Could not copy link'); }
+    setShowShare(false);
+  };
+
+  const handleNativeShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: video.title || 'Check this out on Phatforces',
+          text: video.description || video.title || '',
+          url: videoShareUrl,
+        });
+        recordShare();
+      } catch { /* user cancelled */ }
+    } else {
+      navigator.clipboard.writeText(videoShareUrl).catch(() => {});
+      toast.success('Link copied!');
+      recordShare();
+    }
+    setShowShare(false);
   };
 
   const togglePlay = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-mute-btn]')) return;
+    if ((e.target as HTMLElement).closest('[data-action-btn]')) return;
+
     const now = Date.now();
     if (now - lastTapRef.current < 300) {
       // Double tap - like
@@ -137,10 +311,9 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
       return;
     }
     lastTapRef.current = now;
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) { v.play().catch(() => {}); setPaused(false); }
-    else { v.pause(); setPaused(true); }
+
+    const isPaused = videoController.togglePlayPause(video.id);
+    setPaused(isPaused);
   };
 
   const fmt = (n: number) =>
@@ -149,20 +322,19 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
   const videoSrc = getVideoUrl(video.video_url);
 
   return (
-    <div className="video-item" onClick={togglePlay}>
+    <div className="video-item" data-video-id={video.instanceId || video.id} onClick={togglePlay}>
       {videoSrc ? (
         <video
-          ref={videoRef}
+          ref={combinedRef}
           src={videoSrc}
           loop
           playsInline
-          muted={muted}
           className="max-h-screen max-w-full object-contain"
           style={{ maxWidth: '420px', width: '100%' }}
         />
       ) : (
         <div className="w-full max-w-sm aspect-[9/16] bg-gradient-to-br from-[#1F2030] to-[#2D2F3E] flex items-center justify-center rounded-lg">
-          <span className="text-gray-500 text-4xl">🎬</span>
+          <span className="text-gray-500 text-4xl">▶</span>
         </div>
       )}
 
@@ -195,18 +367,47 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
         {muted ? <BsVolumeMute size={18} /> : <BsVolumeUp size={18} />}
       </button>
 
-      {/* Progress bar - glossy */}
-      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10 z-20">
+      {/* Seekable Play Bar */}
+      <div
+        className="absolute bottom-0 left-0 right-0 z-20 px-0 pb-0 select-none"
+        data-action-btn="true"
+        style={{ touchAction: 'none' }}
+      >
+        {/* Time display - shown while seeking or on hover */}
+        {(showTime || isSeeking) && duration > 0 && (
+          <div className="flex justify-between px-3 pb-1 text-xs font-bold text-white/80 drop-shadow">
+            <span>{fmtTime(currentTime)}</span>
+            <span>{fmtTime(duration)}</span>
+          </div>
+        )}
+        {/* Seek bar track */}
         <div
-          className="h-full transition-all duration-100"
-          style={{
-            width: `${progress}%`,
-            background: 'linear-gradient(90deg, #FE2C55, #ff6b6b)'
-          }}
-        />
+          ref={seekBarRef}
+          className="relative w-full cursor-pointer group"
+          style={{ height: isSeeking ? '20px' : '12px', paddingTop: isSeeking ? '4px' : '7px', paddingBottom: isSeeking ? '4px' : '1px' }}
+          onMouseDown={handleSeekStart}
+          onTouchStart={handleSeekStart}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Track background */}
+          <div className="absolute left-0 right-0 rounded-full" style={{ height: isSeeking ? '4px' : '2px', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.2)' }}>
+            {/* Progress fill */}
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #FE2C55, #ff6b6b)', transition: isSeeking ? 'none' : 'width 0.1s linear' }}
+            />
+          </div>
+          {/* Seek thumb - visible while seeking */}
+          {isSeeking && (
+            <div
+              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full shadow-lg border-2 border-white pointer-events-none"
+              style={{ left: `calc(${progress}% - 8px)`, background: '#FE2C55', boxShadow: '0 0 8px rgba(254,44,85,0.8)' }}
+            />
+          )}
+        </div>
       </div>
 
-      {/* Bottom info - richer gradient */}
+      {/* Bottom info */}
       <div className="absolute bottom-2 left-0 right-16 p-4" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
         <Link
           href={`/@${video.author?.username}`}
@@ -220,7 +421,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
             }
           </div>
           <span className="font-bold text-sm text-white drop-shadow-lg">@{video.author?.username}</span>
-          {video.author?.is_verified && <span className="text-[#FE2C55] text-xs font-bold">&#10003;</span>}
+          {video.author?.is_verified && <span className="text-[#FE2C55] text-xs font-bold">✓</span>}
         </Link>
         {video.title && (
           <p className="text-sm text-white font-semibold drop-shadow-lg line-clamp-2 mb-1 leading-snug">{video.title}</p>
@@ -236,7 +437,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
         </div>
       </div>
 
-      {/* Action buttons - glossier */}
+      {/* Action buttons */}
       <div className="absolute right-2 bottom-16 flex flex-col items-center gap-4">
         {/* Avatar */}
         <Link href={`/@${video.author?.username}`} onClick={e => e.stopPropagation()}>
@@ -254,6 +455,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
 
         {/* Like */}
         <button
+          data-action-btn="true"
           onClick={(e) => { e.stopPropagation(); handleLike(); }}
           className="flex flex-col items-center gap-0.5 group"
         >
@@ -272,6 +474,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
 
         {/* Comment */}
         <button
+          data-action-btn="true"
           onClick={(e) => { e.stopPropagation(); openComments(); }}
           className="flex flex-col items-center gap-0.5 group"
         >
@@ -281,26 +484,37 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
           <span className="text-xs font-bold text-white drop-shadow">{fmt(video.comment_count || 0)}</span>
         </button>
 
-        {/* Save */}
+        {/* Save / Bookmark */}
         <button
+          data-action-btn="true"
           className="flex flex-col items-center gap-0.5 group"
-          onClick={e => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); handleSave(e); }}
         >
-          <div className="w-12 h-12 rounded-full flex items-center justify-center bg-black/30 backdrop-blur-sm border border-white/10 shadow-lg group-hover:scale-110 transition-transform">
-            <IoBookmarkOutline size={24} className="text-white drop-shadow" />
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 ${
+            saved ? 'bg-yellow-500/20' : 'bg-black/30'
+          } backdrop-blur-sm border border-white/10 shadow-lg ${
+            saveAnim ? 'scale-125' : 'scale-100 group-hover:scale-110'
+          }`}>
+            {saved
+              ? <IoBookmark size={24} className="text-yellow-400 drop-shadow" style={{ filter: 'drop-shadow(0 0 6px #facc15)' }} />
+              : <IoBookmarkOutline size={24} className="text-white drop-shadow group-hover:text-yellow-400 transition-colors" />
+            }
           </div>
-          <span className="text-xs font-bold text-white drop-shadow">Save</span>
+          <span className={`text-xs font-bold drop-shadow ${saved ? 'text-yellow-400' : 'text-white'}`}>
+            {saveCount > 0 ? fmt(saveCount) : 'Save'}
+          </span>
         </button>
 
         {/* Share */}
         <button
-          onClick={(e) => { e.stopPropagation(); handleShare(); }}
+          data-action-btn="true"
+          onClick={(e) => { e.stopPropagation(); setShowShare(true); }}
           className="flex flex-col items-center gap-0.5 group"
         >
           <div className="w-12 h-12 rounded-full flex items-center justify-center bg-black/30 backdrop-blur-sm border border-white/10 shadow-lg group-hover:scale-110 transition-transform">
             <AiOutlineShareAlt size={26} className="text-white drop-shadow" />
           </div>
-          <span className="text-xs font-bold text-white drop-shadow">Share</span>
+          <span className="text-xs font-bold text-white drop-shadow">{video.share_count > 0 ? fmt(video.share_count) : 'Share'}</span>
         </button>
       </div>
 
@@ -350,6 +564,116 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                 Post
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Share sheet - TikTok style */}
+      {showShare && (
+        <div
+          className="absolute inset-0 z-50 flex flex-col justify-end"
+          style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)' }}
+          onClick={(e) => { e.stopPropagation(); setShowShare(false); }}
+        >
+          <div
+            className="rounded-t-3xl pb-6"
+            style={{
+              background: 'linear-gradient(180deg, #1e1f30 0%, #161823 100%)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderBottom: 'none'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
+            </div>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3">
+              <span className="text-white font-bold text-base">Share to</span>
+              <button
+                onClick={() => setShowShare(false)}
+                className="text-gray-400 hover:text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10"
+              >
+                <IoClose size={20} />
+              </button>
+            </div>
+
+            {/* Video preview */}
+            <div className="px-4 pb-3">
+              <div className="flex items-center gap-3 p-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="w-10 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-[#2D2F3E]">
+                  {video.thumbnail_url && (
+                    <img src={getThumbUrl(video.thumbnail_url)} alt="" className="w-full h-full object-cover" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-semibold truncate">{video.title || 'Video'}</p>
+                  <p className="text-gray-400 text-xs">@{video.author?.username}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Share options */}
+            <div className="grid grid-cols-4 gap-2 px-4 pb-3">
+              <button onClick={handleCopyLink} className="flex flex-col items-center gap-2 group">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"
+                  style={{ background: 'linear-gradient(135deg, #374151, #1f2937)' }}>
+                  <IoCopyOutline size={24} className="text-white" />
+                </div>
+                <span className="text-white text-xs text-center leading-tight">Copy link</span>
+              </button>
+
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(videoShareUrl)}`}
+                target="_blank" rel="noopener noreferrer"
+                onClick={e => { e.stopPropagation(); setShowShare(false); }}
+                className="flex flex-col items-center gap-2 group"
+              >
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"
+                  style={{ background: 'linear-gradient(135deg, #25d366, #128c7e)' }}>
+                  <IoLogoWhatsapp size={26} className="text-white" />
+                </div>
+                <span className="text-white text-xs text-center leading-tight">WhatsApp</span>
+              </a>
+
+              <a
+                href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(videoShareUrl)}`}
+                target="_blank" rel="noopener noreferrer"
+                onClick={e => { e.stopPropagation(); setShowShare(false); }}
+                className="flex flex-col items-center gap-2 group"
+              >
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"
+                  style={{ background: 'linear-gradient(135deg, #1877f2, #0a52cc)' }}>
+                  <IoLogoFacebook size={26} className="text-white" />
+                </div>
+                <span className="text-white text-xs text-center leading-tight">Facebook</span>
+              </a>
+
+              <button onClick={handleNativeShare} className="flex flex-col items-center gap-2 group">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"
+                  style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}>
+                  <AiOutlineShareAlt size={24} className="text-white" />
+                </div>
+                <span className="text-white text-xs text-center leading-tight">More</span>
+              </button>
+            </div>
+
+            <div className="mx-4 border-t border-white/8 my-1" />
+
+            <div className="px-4 pt-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toast('Noted - we\'ll show you less of this', { icon: '👍' });
+                  setShowShare(false);
+                }}
+                className="w-full text-left px-4 py-3 rounded-xl text-gray-400 text-sm hover:bg-white/5 transition-colors"
+              >
+                Not interested
+              </button>
+            </div>
           </div>
         </div>
       )}

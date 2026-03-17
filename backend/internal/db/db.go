@@ -126,12 +126,32 @@ func Migrate(db *sql.DB) {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_email_otps_email ON email_otps(email)`,
 		`CREATE INDEX IF NOT EXISTS idx_email_otps_expires ON email_otps(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS saved_videos (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			video_id   UUID NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(user_id, video_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_saved_videos_user_id ON saved_videos(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_saved_videos_video_id ON saved_videos(video_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_videos_user_id ON videos(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_video_views_video_id ON video_views(video_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_follows_following_id ON follows(following_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_comments_video_id ON comments(video_id)`,
+		// shared_videos: tracks which users shared which videos (for profile "Shared" tab)
+		`CREATE TABLE IF NOT EXISTS shared_videos (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			video_id   UUID NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(user_id, video_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_shared_videos_user_id ON shared_videos(user_id)`,
+		// admin role column on users
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false`,
 	}
 
 	for _, q := range queries {

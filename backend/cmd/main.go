@@ -54,8 +54,9 @@ func main() {
 		{
 			feedHandler := handlers.NewFeedHandler(database, nil)
 			public.GET("/feed/public", feedHandler.Public)
+			public.GET("/feed/video/:id", feedHandler.PublicVideo)
 
-			searchHandler := handlers.NewSearchHandler(database)
+			searchHandler := handlers.NewSearchHandler(database, cfg.JWTSecret)
 			public.GET("/search", searchHandler.Search)
 			public.GET("/search/trending", searchHandler.Trending)
 
@@ -66,7 +67,7 @@ func main() {
 
 		// Protected routes
 		protected := api.Group("")
-		protected.Use(middleware.Auth(cfg.JWTSecret))
+		protected.Use(middleware.Auth(cfg.JWTSecret, database))
 		{
 			// Users (protected mutations)
 			userHandler := handlers.NewUserHandler(database, rdb)
@@ -79,11 +80,16 @@ func main() {
 			// Videos
 			videoHandler := handlers.NewVideoHandler(database, rdb, cfg)
 			protected.POST("/videos", videoHandler.Upload)
+			protected.GET("/videos/saved", videoHandler.GetSavedVideos)
+			protected.GET("/videos/shared", videoHandler.GetSharedVideos)
 			protected.GET("/videos/:id", videoHandler.GetVideo)
 			protected.DELETE("/videos/:id", videoHandler.DeleteVideo)
 			protected.POST("/videos/:id/like", videoHandler.Like)
 			protected.DELETE("/videos/:id/like", videoHandler.Unlike)
 			protected.POST("/videos/:id/view", videoHandler.RecordView)
+			protected.POST("/videos/:id/save", videoHandler.SaveVideo)
+			protected.DELETE("/videos/:id/save", videoHandler.UnsaveVideo)
+			protected.POST("/videos/:id/share", videoHandler.ShareVideo)
 
 			// Comments
 			commentHandler := handlers.NewCommentHandler(database)
@@ -94,12 +100,23 @@ func main() {
 			// Feed (personalized - requires auth)
 			feedHandlerAuth := handlers.NewFeedHandler(database, rdb)
 			protected.GET("/feed/foryou", feedHandlerAuth.ForYou)
+			protected.DELETE("/feed/queue", feedHandlerAuth.ClearQueue)
 			protected.GET("/feed/following", feedHandlerAuth.Following)
 
 			// Monetization
 			monetHandler := handlers.NewMonetizationHandler(database)
 			protected.GET("/monetization/stats", monetHandler.GetStats)
 			protected.POST("/monetization/withdraw", monetHandler.RequestWithdraw)
+
+			// Admin panel (is_admin=true required - checked inside each handler)
+			adminHandler := handlers.NewAdminHandler(database)
+			protected.GET("/admin/stats", adminHandler.GetStats)
+			protected.GET("/admin/users", adminHandler.ListUsers)
+			protected.DELETE("/admin/users/:id", adminHandler.DeleteUser)
+			protected.PATCH("/admin/users/:id/role", adminHandler.SetUserAdmin)
+			protected.GET("/admin/videos", adminHandler.ListVideos)
+			protected.DELETE("/admin/videos/:id", adminHandler.DeleteVideo)
+			protected.PATCH("/admin/videos/:id/publish", adminHandler.ToggleVideoPublish)
 		}
 	}
 
