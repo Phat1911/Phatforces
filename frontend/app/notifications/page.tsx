@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api, getThumbUrl } from '@/lib/api';
 import { AiOutlineBell, AiOutlineHeart, AiOutlineMessage, AiOutlineDelete } from 'react-icons/ai';
 import { FiUserPlus, FiBookmark } from 'react-icons/fi';
+import { BiCommentDetail } from 'react-icons/bi';
 import Cookies from 'js-cookie';
 
 interface Notification {
@@ -13,6 +14,7 @@ interface Notification {
   is_read: boolean;
   created_at: string;
   video_id: string | null;
+  comment_id: string | null;
   actor_username: string;
   actor_avatar: string;
   actor_display_name: string;
@@ -22,6 +24,7 @@ function typeIcon(type: string) {
   switch (type) {
     case 'like':    return <AiOutlineHeart className="text-[#FE2C55]" size={18} />;
     case 'comment': return <AiOutlineMessage className="text-blue-400" size={18} />;
+    case 'reply':   return <BiCommentDetail className="text-cyan-400" size={18} />;
     case 'follow':  return <FiUserPlus className="text-green-400" size={18} />;
     case 'save':    return <FiBookmark className="text-yellow-400" size={18} />;
     default:        return <AiOutlineBell className="text-gray-400" size={18} />;
@@ -90,9 +93,12 @@ export default function NotificationsPage() {
     }
     // Navigate
     if (notif.type === 'follow') {
-      router.push(`/@${notif.actor_username}`);
+      router.push(`/${notif.actor_username}`);
     } else if (notif.video_id) {
-      router.push(`/?v=${notif.video_id}`);
+      const query = notif.comment_id
+        ? `/?v=${notif.video_id}&c=${notif.comment_id}`
+        : `/?v=${notif.video_id}`;
+      router.push(query);
     }
   };
 

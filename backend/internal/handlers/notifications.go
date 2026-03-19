@@ -17,9 +17,9 @@ func NewNotificationHandler(db *sql.DB) *NotificationHandler {
 }
 
 // CreateNotification inserts a notification for user_id from actor_id.
-// notifType: "like", "comment", "follow", "save"
+// notifType: "like", "comment", "reply", "follow", "save"
 // Safe to call in a goroutine - silently drops errors.
-func CreateNotification(db *sql.DB, userID, actorID, notifType string, videoID *string, message string) {
+func CreateNotification(db *sql.DB, userID, actorID, notifType string, videoID, commentID *string, message string) {
 	go func() {
 		if userID == actorID {
 			return // never notify yourself
@@ -31,14 +31,14 @@ func CreateNotification(db *sql.DB, userID, actorID, notifType string, videoID *
 		}
 		if videoID != nil {
 			db.Exec(`
-				INSERT INTO notifications (user_id, actor_id, type, video_id, message)
-				VALUES ($1, $2, $3, $4, $5)
-			`, userID, actorID, notifType, *videoID, message)
+				INSERT INTO notifications (user_id, actor_id, type, video_id, comment_id, message)
+				VALUES ($1, $2, $3, $4, $5, $6)
+			`, userID, actorID, notifType, *videoID, commentID, message)
 		} else {
 			db.Exec(`
-				INSERT INTO notifications (user_id, actor_id, type, message)
-				VALUES ($1, $2, $3, $4)
-			`, userID, actorID, notifType, message)
+				INSERT INTO notifications (user_id, actor_id, type, comment_id, message)
+				VALUES ($1, $2, $3, $4, $5)
+			`, userID, actorID, notifType, commentID, message)
 		}
 	}()
 }
@@ -49,7 +49,7 @@ func (h *NotificationHandler) GetNotifications(c *gin.Context) {
 
 	rows, err := h.db.Query(`
 		SELECT n.id, n.type, n.message, n.is_read, n.created_at,
-			n.video_id,
+			n.video_id, n.comment_id,
 			COALESCE(u.username, '') AS actor_username,
 			COALESCE(u.avatar_url, '') AS actor_avatar,
 			COALESCE(u.display_name, '') AS actor_display_name
@@ -72,6 +72,7 @@ func (h *NotificationHandler) GetNotifications(c *gin.Context) {
 		IsRead           bool    `json:"is_read"`
 		CreatedAt        string  `json:"created_at"`
 		VideoID          *string `json:"video_id"`
+		CommentID        *string `json:"comment_id"`
 		ActorUsername    string  `json:"actor_username"`
 		ActorAvatar      string  `json:"actor_avatar"`
 		ActorDisplayName string  `json:"actor_display_name"`
@@ -81,7 +82,7 @@ func (h *NotificationHandler) GetNotifications(c *gin.Context) {
 	for rows.Next() {
 		var n Notif
 		rows.Scan(&n.ID, &n.Type, &n.Message, &n.IsRead, &n.CreatedAt,
-			&n.VideoID, &n.ActorUsername, &n.ActorAvatar, &n.ActorDisplayName)
+			&n.VideoID, &n.CommentID, &n.ActorUsername, &n.ActorAvatar, &n.ActorDisplayName)
 		notifs = append(notifs, n)
 	}
 	if notifs == nil {

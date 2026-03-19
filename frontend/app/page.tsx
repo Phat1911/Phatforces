@@ -27,6 +27,7 @@ function HomePage() {
   // Deep link: holds the prefetched target video until the feed is ready to receive it.
   // Using a ref (not state) avoids triggering extra renders during the load sequence.
   const deepLinkVideoRef = useRef<import('@/lib/store').Video | null>(null);
+  const deepLinkCommentRef = useRef<string | null>(null);
   // Set to true while a ?v= deep link fetch is in-flight so the tab-change effect
   // skips its own fetchVideos(reset) call and lets the deep link handle the load.
   const deepLinkPendingRef = useRef(false);
@@ -42,12 +43,15 @@ function HomePage() {
   // gets overwritten by the subsequent feed fetch setVideos([feedVideos...]).
   useEffect(() => {
     const videoId = searchParams.get('v');
+    const commentId = searchParams.get('c');
     if (!videoId || !mounted) return;
+    deepLinkCommentRef.current = commentId;
     const token = Cookies.get('photcot_token');
     const endpoint = token ? `/videos/${videoId}` : `/feed/video/${videoId}`;
     // Remove ?v= from URL immediately so back/forward navigation stays clean
     const url = new URL(window.location.href);
     url.searchParams.delete('v');
+    url.searchParams.delete('c');
     window.history.replaceState({}, '', url.toString());
     deepLinkPendingRef.current = true;
     api.get(endpoint)
@@ -298,6 +302,7 @@ function HomePage() {
                   key={video.instanceId || video.id}
                   video={video}
                   isActive={idx === currentIndex}
+                  targetCommentId={idx === currentIndex ? (deepLinkCommentRef.current || undefined) : undefined}
                   onAuthRequired={() => setShowAuth(true)}
                 />
               );

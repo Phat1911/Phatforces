@@ -221,7 +221,7 @@ func (h *VideoHandler) Like(c *gin.Context) {
 		actorUsername, videoOwnerID, videoTitle := GetActorInfo(h.db, fmt.Sprintf("%v", userID), videoID)
 		if videoOwnerID != "" {
 			msg := fmt.Sprintf("%s liked your video \"%.40s\"", actorUsername, videoTitle)
-			CreateNotification(h.db, videoOwnerID, fmt.Sprintf("%v", userID), "like", &videoID, msg)
+			CreateNotification(h.db, videoOwnerID, fmt.Sprintf("%v", userID), "like", &videoID, nil, msg)
 			SendLikeSignal(fmt.Sprintf("%v", userID), videoID)
 		}
 	}
@@ -302,7 +302,7 @@ func (h *VideoHandler) SaveVideo(c *gin.Context) {
 		actorUsername, videoOwnerID, videoTitle := GetActorInfo(h.db, fmt.Sprintf("%v", userID), videoID)
 		if videoOwnerID != "" {
 			msg := fmt.Sprintf("%s saved your video \"%.40s\"", actorUsername, videoTitle)
-			CreateNotification(h.db, videoOwnerID, fmt.Sprintf("%v", userID), "save", &videoID, msg)
+			CreateNotification(h.db, videoOwnerID, fmt.Sprintf("%v", userID), "save", &videoID, nil, msg)
 			SendSaveSignal(fmt.Sprintf("%v", userID), videoID)
 		}
 	}

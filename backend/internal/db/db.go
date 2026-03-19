@@ -171,12 +171,15 @@ func Migrate(db *sql.DB) {
 			actor_id   UUID REFERENCES users(id) ON DELETE SET NULL,
 			type       VARCHAR(50) NOT NULL,
 			video_id   UUID REFERENCES videos(id) ON DELETE CASCADE,
+			comment_id UUID REFERENCES comments(id) ON DELETE SET NULL,
 			message    TEXT NOT NULL DEFAULT '',
 			is_read    BOOLEAN NOT NULL DEFAULT FALSE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS comment_id UUID REFERENCES comments(id) ON DELETE SET NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_comment_id ON notifications(comment_id)`,
 		// creator communication preferences
 		`CREATE TABLE IF NOT EXISTS creator_settings (
 			user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

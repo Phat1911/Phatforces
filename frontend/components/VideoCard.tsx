@@ -11,7 +11,7 @@ import toast from 'react-hot-toast';
 import Cookies from 'js-cookie';
 import { decodeJwtPayload } from '@/lib/jwt';
 
-interface Props { video: Video; isActive: boolean; onAuthRequired: () => void; }
+interface Props { video: Video; isActive: boolean; onAuthRequired: () => void; targetCommentId?: string; }
 interface Comment {
   id: string;
   content: string;
@@ -22,7 +22,7 @@ interface Comment {
   created_at: string;
 }
 
-export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
+export default function VideoCard({ video, isActive, onAuthRequired, targetCommentId }: Props) {
   // Memoized callback ref - fires synchronously on DOM insert (before IO can fire).
   // Guarantees element is in videoController map before activate() is ever called.
   // Use instanceId as controller key - unique per feed slot, prevents map collision on cycling
@@ -49,6 +49,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
   const [commentImagePreview, setCommentImagePreview] = useState('');
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({});
+  const [visibleReplies, setVisibleReplies] = useState<Record<string, number>>({});
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentCount, setCommentCount] = useState(video.comment_count || 0);
   const [progress, setProgress] = useState(0);
@@ -65,6 +66,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
   const viewRecordedRef = useRef(false);
   const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commentInputRef = useRef<HTMLInputElement>(null);
+  const commentNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     return () => {
@@ -89,6 +91,43 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
       setCommentText(`@${cm.author?.username} `);
     }
   };
+
+  useEffect(() => {
+    if (!targetCommentId || !isActive) return;
+    const ensureOpened = async () => {
+      if (!showComments) {
+        await openComments();
+      }
+      setTimeout(() => {
+        let parentId: string | null = null;
+        for (const cm of comments) {
+          if (cm.id === targetCommentId) {
+            parentId = null;
+            break;
+          }
+          const idx = (cm.replies || []).findIndex(rp => rp.id === targetCommentId);
+          if (idx >= 0) {
+            parentId = cm.id;
+            setExpandedReplies(prev => ({ ...prev, [cm.id]: true }));
+            setVisibleReplies(prev => ({ ...prev, [cm.id]: Math.max(prev[cm.id] || 10, idx + 1, 10) }));
+            break;
+          }
+        }
+        const el = commentNodeRefs.current[targetCommentId];
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('ring-2', 'ring-[#FE2C55]');
+          setTimeout(() => el.classList.remove('ring-2', 'ring-[#FE2C55]'), 2200);
+        }
+        if (!el && parentId) {
+          const parentEl = commentNodeRefs.current[parentId];
+          parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 220);
+    };
+    ensureOpened();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetCommentId, isActive, showComments, comments.length]);
 
   // isActive drives UI only: mute icon sync, paused reset, view tracking.
   // Actual play/pause/mute is owned by videoController.activate() called
@@ -676,7 +715,11 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
               )}
 
               {comments.map(cm => (
-                <div key={cm.id} className="py-1">
+                <div
+                  key={cm.id}
+                  ref={(el) => { commentNodeRefs.current[cm.id] = el; }}
+                  className="py-1"
+                >
                   <div className="flex gap-2.5 md:gap-3">
                     <div
                       className="w-7 h-7 md:w-8 md:h-8 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] md:text-xs font-bold text-white shadow"
@@ -702,10 +745,10 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                         {(cm.replies || []).length > 0 && (
                           <button
                             type="button"
-                            onClick={() => setExpandedReplies(prev => ({ ...prev, [cm.id]: !(prev[cm.id] ?? true) }))}
+                            onClick={() => setExpandedReplies(prev => ({ ...prev, [cm.id]: !(prev[cm.id] ?? false) }))}
                             className="text-xs text-gray-400 hover:text-gray-200"
                           >
-                            {(expandedReplies[cm.id] ?? true) ? `Hide replies (${(cm.replies || []).length})` : `Show replies (${(cm.replies || []).length})`}
+                            {`${(cm.replies || []).length} reply`}
                           </button>
                         )}
                         {canDelete(cm.author?.username) && (
@@ -721,8 +764,12 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                     </div>
                   </div>
 
-                  {(expandedReplies[cm.id] ?? true) && (cm.replies || []).map((rp) => (
-                    <div key={rp.id} className="flex gap-2.5 md:gap-3 mt-2 ml-8">
+                  {(expandedReplies[cm.id] ?? false) && (cm.replies || []).slice(0, visibleReplies[cm.id] || 10).map((rp) => (
+                    <div
+                      key={rp.id}
+                      ref={(el) => { commentNodeRefs.current[rp.id] = el; }}
+                      className="flex gap-2.5 md:gap-3 mt-2 ml-10"
+                    >
                       <div
                         className="w-6 h-6 md:w-7 md:h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[9px] md:text-[10px] font-bold text-white shadow"
                         style={{ background: 'linear-gradient(135deg, #6378ff, #8f66ff)' }}
@@ -758,6 +805,15 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                       </div>
                     </div>
                   ))}
+                  {(expandedReplies[cm.id] ?? false) && (cm.replies || []).length > (visibleReplies[cm.id] || 10) && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleReplies(prev => ({ ...prev, [cm.id]: (prev[cm.id] || 10) + 10 }))}
+                      className="ml-10 mt-2 text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
+                    >
+                      {`See more +${(cm.replies || []).length - (visibleReplies[cm.id] || 10)}`}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

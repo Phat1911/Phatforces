@@ -139,7 +139,7 @@ func (h *UserHandler) Follow(c *gin.Context) {
 		var actorName string
 		h.db.QueryRow(`SELECT username FROM users WHERE id=$1`, followerID).Scan(&actorName)
 		msg := fmt.Sprintf("%s started following you", actorName)
-		CreateNotification(h.db, fmt.Sprintf("%v", followingID), fmt.Sprintf("%v", followerID), "follow", nil, msg)
+		CreateNotification(h.db, fmt.Sprintf("%v", followingID), fmt.Sprintf("%v", followerID), "follow", nil, nil, msg)
 		SendFollowSignal(fmt.Sprintf("%v", followerID), fmt.Sprintf("%v", followingID))
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "followed"})

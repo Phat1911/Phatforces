@@ -152,7 +152,16 @@ func (h *CommentHandler) insertComment(c *gin.Context, commentID, userID, videoI
 	actorUsername, videoOwnerID, videoTitle := GetActorInfo(h.db, userID, videoID)
 	if videoOwnerID != "" {
 		msg := fmt.Sprintf("%s commented on your video \"%.40s\"", actorUsername, videoTitle)
-		CreateNotification(h.db, videoOwnerID, userID, "comment", &videoID, msg)
+		CreateNotification(h.db, videoOwnerID, userID, "comment", &videoID, &comment.ID, msg)
+	}
+
+	if parent.Valid {
+		var parentUserID string
+		err := h.db.QueryRow(`SELECT user_id::text FROM comments WHERE id=$1`, parent.String).Scan(&parentUserID)
+		if err == nil && parentUserID != "" && parentUserID != userID {
+			msg := fmt.Sprintf("%s replied to your comment", actorUsername)
+			CreateNotification(h.db, parentUserID, userID, "reply", &videoID, &comment.ID, msg)
+		}
 	}
 
 	return &comment, nil
