@@ -220,21 +220,37 @@ func (h *CommentHandler) DeleteComment(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 	commentID := c.Param("id")
 
-	var videoID string
-	err := h.db.QueryRow(`SELECT video_id FROM comments WHERE id=$1 AND user_id=$2`, commentID, userID).Scan(&videoID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "comment not found"})
-		return
-	}
-
-	result, err := h.db.Exec(`DELETE FROM comments WHERE id=$1 AND user_id=$2`, commentID, userID)
+	var videoID sql.NullString
+	var deletedCount int
+	err := h.db.QueryRow(`
+		WITH RECURSIVE to_delete AS (
+			SELECT id, video_id
+			FROM comments
+			WHERE id = $1 AND user_id = $2
+			UNION ALL
+			SELECT c.id, c.video_id
+			FROM comments c
+			JOIN to_delete td ON c.parent_id = td.id
+		),
+		deleted AS (
+			DELETE FROM comments
+			WHERE id IN (SELECT id FROM to_delete)
+			RETURNING id
+		)
+		SELECT
+			(SELECT video_id::text FROM to_delete LIMIT 1) AS video_id,
+			(SELECT COUNT(*) FROM deleted) AS deleted_count
+	`).Scan(&videoID, &deletedCount)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
 		return
 	}
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
-		h.db.Exec(`UPDATE videos SET comment_count = GREATEST(comment_count - 1, 0) WHERE id = $1`, videoID)
+
+	if !videoID.Valid || deletedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "comment not found"})
+		return
 	}
+
+	h.db.Exec(`UPDATE videos SET comment_count = GREATEST(comment_count - $2, 0) WHERE id = $1`, videoID.String, deletedCount)
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
