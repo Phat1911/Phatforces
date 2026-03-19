@@ -22,6 +22,10 @@ interface Comment {
   created_at: string;
 }
 
+function countAllComments(list: Comment[]): number {
+  return list.reduce((sum, cm) => sum + 1 + ((cm.replies || []).length), 0);
+}
+
 export default function VideoCard({ video, isActive, onAuthRequired, targetCommentId }: Props) {
   // Memoized callback ref - fires synchronously on DOM insert (before IO can fire).
   // Guarantees element is in videoController map before activate() is ever called.
@@ -317,7 +321,9 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     setCommentsLoading(true);
     try {
       const res = await api.get(`/videos/${video.id}/comments`);
-      setComments(res.data.comments || []);
+      const loaded = res.data.comments || [];
+      setComments(loaded);
+      setCommentCount(countAllComments(loaded));
     } catch { toast.error('Could not load comments'); }
     finally { setCommentsLoading(false); }
   };
@@ -364,10 +370,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
         }
         return [created, ...prev];
       });
-      // Increment comment count for top-level comments
-      if (!created.parent_id) {
-        setCommentCount(prev => prev + 1);
-      }
+      setCommentCount(prev => prev + 1);
       setCommentText('');
       onCommentImageChange(null);
       setReplyTo(null);
@@ -396,18 +399,21 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
   const deleteComment = async (commentId: string, isReply: boolean, parentId?: string) => {
     try {
       await api.delete(`/comments/${commentId}`);
-      
+
       if (isReply && parentId) {
         // Remove reply from parent
-        setComments(prev => prev.map(cm => 
+        setComments(prev => prev.map(cm =>
           cm.id === parentId
             ? { ...cm, replies: (cm.replies || []).filter(rp => rp.id !== commentId) }
             : cm
         ));
-      } else {
-        // Remove top-level comment
-        setComments(prev => prev.filter(cm => cm.id !== commentId));
         setCommentCount(prev => Math.max(0, prev - 1));
+      } else {
+        // Remove top-level comment (and account for local nested replies removed with it)
+        const target = comments.find(cm => cm.id === commentId);
+        const removedCount = 1 + ((target?.replies || []).length);
+        setComments(prev => prev.filter(cm => cm.id !== commentId));
+        setCommentCount(prev => Math.max(0, prev - removedCount));
       }
       toast.success('Comment deleted');
     } catch { toast.error('Failed to delete comment'); }
@@ -747,7 +753,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
                           onClick={() => setExpandedReplies(prev => ({ ...prev, [cm.id]: !(prev[cm.id] ?? false) }))}
                           className="text-xs text-gray-400 hover:text-gray-200"
                         >
-                          {`${(cm.replies || []).length} ${(cm.replies || []).length === 1 ? 'reply' : 'replies'}`}
+                          {`${(cm.replies || []).length} reply`}
                         </button>
                         {canDelete(cm.author?.username) && (
                           <button
