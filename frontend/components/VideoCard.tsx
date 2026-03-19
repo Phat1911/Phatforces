@@ -742,15 +742,13 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
                         >
                           Reply
                         </button>
-                        {(cm.replies || []).length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setExpandedReplies(prev => ({ ...prev, [cm.id]: !(prev[cm.id] ?? false) }))}
-                            className="text-xs text-gray-400 hover:text-gray-200"
-                          >
-                            {`${(cm.replies || []).length} reply`}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => setExpandedReplies(prev => ({ ...prev, [cm.id]: !(prev[cm.id] ?? false) }))}
+                          className="text-xs text-gray-400 hover:text-gray-200"
+                        >
+                          {`${(cm.replies || []).length} ${(cm.replies || []).length === 1 ? 'reply' : 'replies'}`}
+                        </button>
                         {canDelete(cm.author?.username) && (
                           <button
                             type="button"
@@ -805,6 +803,9 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
                       </div>
                     </div>
                   ))}
+                  {(expandedReplies[cm.id] ?? false) && (cm.replies || []).length === 0 && (
+                    <div className="ml-10 mt-2 text-xs text-gray-500">No replies yet</div>
+                  )}
                   {(expandedReplies[cm.id] ?? false) && (cm.replies || []).length > (visibleReplies[cm.id] || 10) && (
                     <button
                       type="button"
