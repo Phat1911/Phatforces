@@ -6,6 +6,7 @@
 
 :root {
   --mobile-bottom-nav-height: calc(56px + env(safe-area-inset-bottom));
+  --mobile-playbar-height: 12px;
 }
 
 body {
@@ -31,6 +32,7 @@ body {
 @media (min-width: 768px) {
   :root {
     --mobile-bottom-nav-height: 0px;
+    --mobile-playbar-height: 0px;
   }
 
   .video-feed-container {

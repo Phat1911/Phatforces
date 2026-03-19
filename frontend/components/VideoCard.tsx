@@ -548,7 +548,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       <div
         className="absolute bottom-0 left-0 right-0 z-20 px-0 pb-0 select-none"
         data-action-btn="true"
-        style={{ bottom: 'var(--mobile-bottom-nav-height)', touchAction: 'none' }}
+        style={{ touchAction: 'none' }}
       >
         {/* Time display - shown while seeking or on hover */}
         {(showTime || isSeeking) && duration > 0 && (
@@ -585,7 +585,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       </div>
 
       {/* Bottom info */}
-      <div className="absolute left-0 right-16 p-4 md:bottom-2" style={{ bottom: 'calc(var(--mobile-bottom-nav-height) + 0.5rem)', background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
+      <div className="absolute left-0 right-16 p-4 md:bottom-2" style={{ bottom: 'calc(var(--mobile-playbar-height) + 0.5rem)', background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
         <Link
           href={`/${video.author?.username}`}
           className="flex items-center gap-2 mb-2"
@@ -615,7 +615,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       </div>
 
       {/* Action buttons */}
-      <div className="absolute right-2 md:bottom-16 flex flex-col items-center gap-4" style={{ bottom: 'calc(var(--mobile-bottom-nav-height) + 3.5rem)' }}>
+      <div className="absolute right-2 md:bottom-16 flex flex-col items-center gap-4" style={{ bottom: 'calc(var(--mobile-playbar-height) + 3.25rem)' }}>
         {/* Avatar */}
         <Link href={`/${video.author?.username}`} onClick={e => e.stopPropagation()}>
           <div className="relative">
