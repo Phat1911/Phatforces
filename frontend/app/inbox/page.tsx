@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import Cookies from 'js-cookie';
 import toast from 'react-hot-toast';
 import { api, getThumbUrl } from '@/lib/api';
@@ -28,7 +29,7 @@ function formatTime(dateStr: string): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function InboxPage() {
+function InboxPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -199,5 +200,17 @@ export default function InboxPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function InboxPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#161823] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[#FE2C55] border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <InboxPageContent />
+    </Suspense>
   );
 }
