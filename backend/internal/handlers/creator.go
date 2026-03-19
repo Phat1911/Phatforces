@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -118,6 +119,17 @@ func NewMessageHandler(db *sql.DB) *MessageHandler {
 	return &MessageHandler{db: db}
 }
 
+func truncateMessagePreview(s string, maxRunes int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= maxRunes {
+		return string(r)
+	}
+	if maxRunes <= 3 {
+		return string(r[:maxRunes])
+	}
+	return string(r[:maxRunes-3]) + "..."
+}
+
 func (h *MessageHandler) SendMessage(c *gin.Context) {
 	fromUserID, _ := c.Get("user_id")
 	fromID := fmt.Sprintf("%v", fromUserID)
@@ -165,5 +177,91 @@ func (h *MessageHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	// Notify receiver with a deep-linkable message notification.
+	var senderUsername string
+	_ = h.db.QueryRow(`SELECT username FROM users WHERE id=$1`, fromID).Scan(&senderUsername)
+	if senderUsername == "" {
+		senderUsername = "Someone"
+	}
+	preview := truncateMessagePreview(content, 80)
+	notifMsg := fmt.Sprintf("%s sent you a message: %s", senderUsername, preview)
+	CreateNotification(h.db, req.ToUserID, fromID, "message", nil, nil, notifMsg)
+
 	c.JSON(http.StatusOK, gin.H{"message": "sent"})
+}
+
+func (h *MessageHandler) GetConversationByUsername(c *gin.Context) {
+	meRaw, _ := c.Get("user_id")
+	me := fmt.Sprintf("%v", meRaw)
+	username := strings.TrimSpace(c.Param("username"))
+	if username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	var peer struct {
+		ID          string `json:"id"`
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		AvatarURL   string `json:"avatar_url"`
+	}
+	err := h.db.QueryRow(`
+		SELECT id::text, username, COALESCE(display_name, ''), COALESCE(avatar_url, '')
+		FROM users
+		WHERE LOWER(username) = LOWER($1)
+	`, username).Scan(&peer.ID, &peer.Username, &peer.DisplayName, &peer.AvatarURL)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load conversation"})
+		return
+	}
+	if peer.ID == me {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot open conversation with yourself"})
+		return
+	}
+
+	rows, err := h.db.Query(`
+		SELECT id::text, from_user_id::text, to_user_id::text, content, created_at
+		FROM (
+			SELECT id, from_user_id, to_user_id, content, created_at
+			FROM direct_messages
+			WHERE (from_user_id = $1 AND to_user_id = $2)
+			   OR (from_user_id = $2 AND to_user_id = $1)
+			ORDER BY created_at DESC
+			LIMIT 200
+		) AS m
+		ORDER BY created_at ASC
+	`, me, peer.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load messages"})
+		return
+	}
+	defer rows.Close()
+
+	type DM struct {
+		ID         string `json:"id"`
+		FromUserID string `json:"from_user_id"`
+		ToUserID   string `json:"to_user_id"`
+		Content    string `json:"content"`
+		CreatedAt  string `json:"created_at"`
+	}
+	msgs := make([]DM, 0)
+	for rows.Next() {
+		var m DM
+		var createdAt time.Time
+		if err := rows.Scan(&m.ID, &m.FromUserID, &m.ToUserID, &m.Content, &createdAt); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse messages"})
+			return
+		}
+		m.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		msgs = append(msgs, m)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"peer":     peer,
+		"messages": msgs,
+	})
 }

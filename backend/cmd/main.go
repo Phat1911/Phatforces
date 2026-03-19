@@ -105,6 +105,7 @@ func main() {
 			protected.PATCH("/creator/settings/me", creatorSettings.UpdateMySettings)
 			messageHandler := handlers.NewMessageHandler(database)
 			protected.POST("/messages", messageHandler.SendMessage)
+			protected.GET("/messages/with/:username", messageHandler.GetConversationByUsername)
 
 			// Feed (personalized - requires auth)
 			feedHandlerAuth := handlers.NewFeedHandler(database, rdb)

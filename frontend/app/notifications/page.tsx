@@ -25,6 +25,7 @@ function typeIcon(type: string) {
     case 'like':    return <AiOutlineHeart className="text-[#FE2C55]" size={18} />;
     case 'comment': return <AiOutlineMessage className="text-blue-400" size={18} />;
     case 'reply':   return <BiCommentDetail className="text-cyan-400" size={18} />;
+    case 'message': return <AiOutlineMessage className="text-violet-400" size={18} />;
     case 'follow':  return <FiUserPlus className="text-green-400" size={18} />;
     case 'save':    return <FiBookmark className="text-yellow-400" size={18} />;
     default:        return <AiOutlineBell className="text-gray-400" size={18} />;
@@ -94,6 +95,8 @@ export default function NotificationsPage() {
     // Navigate
     if (notif.type === 'follow') {
       router.push(`/${notif.actor_username}`);
+    } else if (notif.type === 'message' && notif.actor_username) {
+      router.push(`/inbox?with=${encodeURIComponent(notif.actor_username)}`);
     } else if (notif.video_id) {
       const query = notif.comment_id
         ? `/?v=${notif.video_id}&c=${notif.comment_id}`
