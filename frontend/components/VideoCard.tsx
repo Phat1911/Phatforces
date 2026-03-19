@@ -76,9 +76,19 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
 
   useEffect(() => {
     if (!replyTo) return;
-    const timer = setTimeout(() => commentInputRef.current?.focus(), 0);
+    const timer = setTimeout(() => {
+      commentInputRef.current?.focus();
+      commentInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 0);
     return () => clearTimeout(timer);
   }, [replyTo]);
+
+  const startReply = (cm: Comment) => {
+    setReplyTo(cm);
+    if (!commentText.trim()) {
+      setCommentText(`@${cm.author?.username} `);
+    }
+  };
 
   // isActive drives UI only: mute icon sync, paused reset, view tracking.
   // Actual play/pause/mute is owned by videoController.activate() called
@@ -288,10 +298,9 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
     e.preventDefault();
     if (!Cookies.get('photcot_token')) { onAuthRequired(); return; }
     if (!commentText.trim() && !commentImage) return;
+    const trimmed = commentText.trim();
+    const hasImage = Boolean(commentImage);
     try {
-      const trimmed = commentText.trim();
-      const hasImage = Boolean(commentImage);
-
       const res = hasImage
         ? await api.post(`/videos/${video.id}/comments`, (() => {
             const form = new FormData();
@@ -324,7 +333,25 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
       onCommentImageChange(null);
       setReplyTo(null);
       toast.success('Comment posted!');
-    } catch { toast.error('Failed to post comment'); }
+    } catch {
+      // Fallback for backends that still do not support parent_id threading.
+      if (replyTo && !hasImage && trimmed) {
+        try {
+          const fallbackText = trimmed.startsWith('@') ? trimmed : `@${replyTo.author?.username} ${trimmed}`;
+          const res = await api.post(`/videos/${video.id}/comments`, { content: fallbackText });
+          const created = res.data as Comment;
+          setComments(prev => [created, ...prev]);
+          setCommentCount(prev => prev + 1);
+          setCommentText('');
+          setReplyTo(null);
+          toast.success('Reply posted as comment');
+          return;
+        } catch {
+          // Keep generic error below.
+        }
+      }
+      toast.error('Failed to post comment');
+    }
   };
 
   const deleteComment = async (commentId: string, isReply: boolean, parentId?: string) => {
@@ -667,7 +694,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                       <div className="flex items-center gap-3 mt-1.5">
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); setReplyTo(cm); }}
+                          onClick={(e) => { e.stopPropagation(); startReply(cm); }}
                           className="text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
                         >
                           Reply
@@ -708,6 +735,15 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                         {rp.image_url && (
                           <img src={getThumbUrl(rp.image_url)} alt="reply" className="mt-2 rounded-xl max-h-36 w-auto border border-white/10" />
                         )}
+                        <div className="mt-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); startReply(rp); }}
+                            className="text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
+                          >
+                            Reply
+                          </button>
+                        </div>
                         {canDelete(rp.author?.username) && (
                           <div className="mt-1.5">
                             <button
