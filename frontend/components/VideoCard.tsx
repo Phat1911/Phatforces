@@ -64,6 +64,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
   const lastTapRef = useRef(0);
   const viewRecordedRef = useRef(false);
   const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     return () => {
@@ -72,6 +73,12 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
       }
     };
   }, [commentImagePreview]);
+
+  useEffect(() => {
+    if (!replyTo) return;
+    const timer = setTimeout(() => commentInputRef.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [replyTo]);
 
   // isActive drives UI only: mute icon sync, paused reset, view tracking.
   // Actual play/pause/mute is owned by videoController.activate() called
@@ -322,7 +329,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
 
   const deleteComment = async (commentId: string, isReply: boolean, parentId?: string) => {
     try {
-      await api.delete(`/videos/${video.id}/comments/${commentId}`);
+      await api.delete(`/comments/${commentId}`);
       
       if (isReply && parentId) {
         // Remove reply from parent
@@ -344,7 +351,14 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
     const token = Cookies.get('photcot_token');
     if (!token) return null;
     const payload = decodeJwtPayload(token);
-    return payload?.username as string | null;
+    const username = typeof payload?.username === 'string' ? payload.username : null;
+    return username?.toLowerCase() || null;
+  };
+
+  const canDelete = (commentUsername?: string) => {
+    if (!commentUsername) return false;
+    const current = getCurrentUsername();
+    return Boolean(current && current === commentUsername.toLowerCase());
   };
 
   const videoShareUrl = typeof window !== 'undefined'
@@ -653,7 +667,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                       <div className="flex items-center gap-3 mt-1.5">
                         <button
                           type="button"
-                          onClick={() => setReplyTo(cm)}
+                          onClick={(e) => { e.stopPropagation(); setReplyTo(cm); }}
                           className="text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
                         >
                           Reply
@@ -667,10 +681,10 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                             {(expandedReplies[cm.id] ?? true) ? `Hide replies (${(cm.replies || []).length})` : `Show replies (${(cm.replies || []).length})`}
                           </button>
                         )}
-                        {getCurrentUsername() === cm.author?.username && (
+                        {canDelete(cm.author?.username) && (
                           <button
                             type="button"
-                            onClick={() => deleteComment(cm.id, false)}
+                            onClick={(e) => { e.stopPropagation(); deleteComment(cm.id, false); }}
                             className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
                           >
                             <IoTrash size={12} /> Delete
@@ -694,11 +708,11 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
                         {rp.image_url && (
                           <img src={getThumbUrl(rp.image_url)} alt="reply" className="mt-2 rounded-xl max-h-36 w-auto border border-white/10" />
                         )}
-                        {getCurrentUsername() === rp.author?.username && (
+                        {canDelete(rp.author?.username) && (
                           <div className="mt-1.5">
                             <button
                               type="button"
-                              onClick={() => deleteComment(rp.id, true, cm.id)}
+                              onClick={(e) => { e.stopPropagation(); deleteComment(rp.id, true, cm.id); }}
                               className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
                             >
                               <IoTrash size={12} /> Delete
@@ -749,6 +763,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
 
               <div className="flex gap-2">
                 <input
+                  ref={commentInputRef}
                   value={commentText}
                   onChange={e => setCommentText(e.target.value)}
                   placeholder="Add a comment..."
