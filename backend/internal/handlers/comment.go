@@ -240,7 +240,7 @@ func (h *CommentHandler) DeleteComment(c *gin.Context) {
 		SELECT
 			(SELECT video_id::text FROM to_delete LIMIT 1) AS video_id,
 			(SELECT COUNT(*) FROM deleted) AS deleted_count
-	`).Scan(&videoID, &deletedCount)
+	`, commentID, userID).Scan(&videoID, &deletedCount)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
 		return
