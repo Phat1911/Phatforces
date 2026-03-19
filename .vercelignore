@@ -1,0 +1,13 @@
+.git
+.github
+backend
+deploy
+docs
+recommender
+recommender_venv
+scripts
+uploads
+**/__pycache__
+**/*.pt
+**/*.bak
+*.log

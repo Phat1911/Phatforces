@@ -282,14 +282,23 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
     if (!Cookies.get('photcot_token')) { onAuthRequired(); return; }
     if (!commentText.trim() && !commentImage) return;
     try {
-      const form = new FormData();
-      if (commentText.trim()) form.append('content', commentText.trim());
-      if (commentImage) form.append('image', commentImage);
-      if (replyTo?.id) form.append('parent_id', replyTo.id);
+      const trimmed = commentText.trim();
+      const hasImage = Boolean(commentImage);
 
-      const res = await api.post(`/videos/${video.id}/comments`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = hasImage
+        ? await api.post(`/videos/${video.id}/comments`, (() => {
+            const form = new FormData();
+            if (trimmed) form.append('content', trimmed);
+            if (commentImage) form.append('image', commentImage);
+            if (replyTo?.id) form.append('parent_id', replyTo.id);
+            return form;
+          })(), {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          })
+        : await api.post(`/videos/${video.id}/comments`, {
+            content: trimmed,
+            parent_id: replyTo?.id || '',
+          });
 
       const created = res.data as Comment;
       setComments(prev => {
