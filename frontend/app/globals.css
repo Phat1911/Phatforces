@@ -6,7 +6,10 @@
 
 :root {
   --mobile-bottom-nav-height: calc(56px + env(safe-area-inset-bottom));
-  --mobile-playbar-height: 12px;
+  --mobile-playbar-height: 10px;
+  --video-info-bottom-offset: var(--mobile-playbar-height);
+  --video-info-min-height: 7.25rem;
+  --video-actions-bottom-offset: calc(var(--mobile-playbar-height) + var(--video-info-min-height));
 }
 
 body {
@@ -33,6 +36,9 @@ body {
   :root {
     --mobile-bottom-nav-height: 0px;
     --mobile-playbar-height: 0px;
+    --video-info-bottom-offset: 0.5rem;
+    --video-info-min-height: 0px;
+    --video-actions-bottom-offset: 4rem;
   }
 
   .video-feed-container {

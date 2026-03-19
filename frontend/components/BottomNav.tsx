@@ -35,7 +35,7 @@ export default function BottomNav({ onAuthRequired }: Props) {
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-30 flex justify-around items-center bg-[#161823] border-t border-[#2D2F3E]"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-30 flex justify-around items-center bg-[#161823]"
       style={{ height: 'calc(56px + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <Link href="/" className={`flex flex-col items-center gap-0.5 ${pathname === '/' ? 'text-white' : 'text-gray-500'}`}>

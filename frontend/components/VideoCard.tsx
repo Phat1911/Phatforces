@@ -561,7 +561,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
         <div
           ref={seekBarRef}
           className="relative w-full cursor-pointer group"
-          style={{ height: isSeeking ? '20px' : '12px', paddingTop: isSeeking ? '4px' : '7px', paddingBottom: isSeeking ? '4px' : '1px' }}
+          style={{ height: isSeeking ? '16px' : 'var(--mobile-playbar-height)', paddingTop: 0, paddingBottom: 0 }}
           onMouseDown={handleSeekStart}
           onTouchStart={handleSeekStart}
           onClick={e => e.stopPropagation()}
@@ -585,7 +585,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       </div>
 
       {/* Bottom info */}
-      <div className="absolute left-0 right-16 p-4 md:bottom-2" style={{ bottom: 'calc(var(--mobile-playbar-height) + 0.5rem)', background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
+      <div className="absolute left-0 right-0 p-4 pr-24 md:pr-4" style={{ bottom: 'var(--video-info-bottom-offset)', minHeight: 'var(--video-info-min-height)', background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
         <Link
           href={`/${video.author?.username}`}
           className="flex items-center gap-2 mb-2"
@@ -615,7 +615,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       </div>
 
       {/* Action buttons */}
-      <div className="absolute right-2 md:bottom-16 flex flex-col items-center gap-4" style={{ bottom: 'calc(var(--mobile-playbar-height) + 3.25rem)' }}>
+      <div className="absolute right-2 md:bottom-16 flex flex-col items-center gap-4" style={{ bottom: 'var(--video-actions-bottom-offset)' }}>
         {/* Avatar */}
         <Link href={`/${video.author?.username}`} onClick={e => e.stopPropagation()}>
           <div className="relative">
