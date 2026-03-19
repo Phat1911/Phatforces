@@ -130,6 +130,34 @@ func truncateMessagePreview(s string, maxRunes int) string {
 	return string(r[:maxRunes-3]) + "..."
 }
 
+func isMissingRelationErr(err error, relation string) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "relation") && strings.Contains(s, strings.ToLower(relation)) && strings.Contains(s, "does not exist")
+}
+
+func (h *MessageHandler) ensureDirectMessagesTable() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS direct_messages (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			from_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			to_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			content TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_direct_messages_to_user_id ON direct_messages(to_user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_direct_messages_from_user_id ON direct_messages(from_user_id)`,
+	}
+	for _, q := range queries {
+		if _, err := h.db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (h *MessageHandler) SendMessage(c *gin.Context) {
 	fromUserID, _ := c.Get("user_id")
 	fromID := fmt.Sprintf("%v", fromUserID)
@@ -160,8 +188,12 @@ func (h *MessageHandler) SendMessage(c *gin.Context) {
 	var canReceive bool
 	err := h.db.QueryRow(`SELECT COALESCE((SELECT messages_enabled FROM creator_settings WHERE user_id=$1), TRUE)`, req.ToUserID).Scan(&canReceive)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate recipient"})
-		return
+		if isMissingRelationErr(err, "creator_settings") {
+			canReceive = true
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate recipient"})
+			return
+		}
 	}
 	if !canReceive {
 		c.JSON(http.StatusForbidden, gin.H{"error": "creator is not receiving messages"})
@@ -172,6 +204,14 @@ func (h *MessageHandler) SendMessage(c *gin.Context) {
 		INSERT INTO direct_messages (from_user_id, to_user_id, content)
 		VALUES ($1, $2, $3)
 	`, fromID, req.ToUserID, content)
+	if err != nil && isMissingRelationErr(err, "direct_messages") {
+		if migrateErr := h.ensureDirectMessagesTable(); migrateErr == nil {
+			_, err = h.db.Exec(`
+				INSERT INTO direct_messages (from_user_id, to_user_id, content)
+				VALUES ($1, $2, $3)
+			`, fromID, req.ToUserID, content)
+		}
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send message"})
 		return
