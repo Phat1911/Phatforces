@@ -75,7 +75,7 @@ function VideoGridItem({ video, onClick }: { video: Video; onClick: () => void }
         <p className="text-white text-xs font-semibold line-clamp-2 mb-1 leading-tight">{video.title}</p>
         <div className="flex items-center justify-between">
           <Link
-            href={`/@${video.author?.username}`}
+            href={`/${video.author?.username}`}
             className="text-gray-300 text-xs hover:text-white transition-colors"
             onClick={e => e.stopPropagation()}
           >

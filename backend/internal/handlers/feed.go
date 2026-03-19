@@ -758,3 +758,46 @@ func SendSearchSignal(userID, query string, keywords []string) {
 		resp.Body.Close()
 	}()
 }
+
+// SendLikeSignal fires a like signal to the recommender.
+func SendLikeSignal(userID, videoID string) {
+	go func() {
+		payload, _ := json.Marshal(map[string]interface{}{
+			"user_id":  userID,
+			"video_id": videoID,
+			"type":     "like",
+			"weight":   1.5,
+		})
+		resp, err := http.Post(fmt.Sprintf("%s/signal/like", recommenderURL()), "application/json", bytes.NewReader(payload))
+		if err != nil { return }
+		resp.Body.Close()
+	}()
+}
+
+// SendSaveSignal fires a save signal to the recommender.
+func SendSaveSignal(userID, videoID string) {
+	go func() {
+		payload, _ := json.Marshal(map[string]interface{}{
+			"user_id":  userID,
+			"video_id": videoID,
+			"type":     "save",
+			"weight":   2.0,
+		})
+		resp, err := http.Post(fmt.Sprintf("%s/signal/save", recommenderURL()), "application/json", bytes.NewReader(payload))
+		if err != nil { return }
+		resp.Body.Close()
+	}()
+}
+
+// SendFollowSignal fires a follow signal to the recommender.
+func SendFollowSignal(followerID, followingID string) {
+	go func() {
+		payload, _ := json.Marshal(map[string]interface{}{
+			"follower_id":  followerID,
+			"following_id": followingID,
+		})
+		resp, err := http.Post(fmt.Sprintf("%s/signal/follow", recommenderURL()), "application/json", bytes.NewReader(payload))
+		if err != nil { return }
+		resp.Body.Close()
+	}()
+}

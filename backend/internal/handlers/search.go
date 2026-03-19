@@ -71,6 +71,83 @@ func (h *SearchHandler) tryExtractUserID(c *gin.Context) string {
 	return uid
 }
 
+// SaveSearchHistory saves a search query for an authenticated user (max 20, deduplicates).
+func (h *SearchHandler) SaveSearchHistory(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	var req struct {
+		Query string `json:"query"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Query) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "query is required"})
+		return
+	}
+	q := strings.TrimSpace(req.Query)
+	// Delete existing same query for this user (dedup)
+	h.db.Exec(`DELETE FROM search_history WHERE user_id=$1 AND query=$2`, userID, q)
+	// Insert fresh entry on top
+	h.db.Exec(`INSERT INTO search_history (user_id, query) VALUES ($1, $2)`, userID, q)
+	// Keep only last 20 per user
+	h.db.Exec(`
+		DELETE FROM search_history WHERE id IN (
+			SELECT id FROM search_history WHERE user_id=$1
+			ORDER BY created_at DESC OFFSET 20
+		)`, userID)
+	c.JSON(http.StatusOK, gin.H{"message": "saved"})
+}
+
+// GetSearchHistory returns the last 20 search queries for the authenticated user.
+func (h *SearchHandler) GetSearchHistory(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	rows, err := h.db.Query(
+		`SELECT id, query, created_at FROM search_history WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20`,
+		userID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed"})
+		return
+	}
+	defer rows.Close()
+	type Entry struct {
+		ID        string `json:"id"`
+		Query     string `json:"query"`
+		CreatedAt string `json:"created_at"`
+	}
+	var history []Entry
+	for rows.Next() {
+		var e Entry
+		rows.Scan(&e.ID, &e.Query, &e.CreatedAt)
+		history = append(history, e)
+	}
+	if history == nil {
+		history = []Entry{}
+	}
+	c.JSON(http.StatusOK, gin.H{"history": history})
+}
+
+// DeleteSearchHistory deletes a single search history entry by ID.
+func (h *SearchHandler) DeleteSearchHistory(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	id := c.Param("id")
+	res, err := h.db.Exec(`DELETE FROM search_history WHERE id=$1 AND user_id=$2`, id, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed"})
+		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+// ClearSearchHistory deletes all search history for the authenticated user.
+func (h *SearchHandler) ClearSearchHistory(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	h.db.Exec(`DELETE FROM search_history WHERE user_id=$1`, userID)
+	c.JSON(http.StatusOK, gin.H{"message": "cleared"})
+}
+
 func (h *SearchHandler) Search(c *gin.Context) {
 	rawQuery := c.Query("q")
 	q := "%" + rawQuery + "%"

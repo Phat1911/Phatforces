@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"log"
 
-	"github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 func Connect(dsn string) *sql.DB {
@@ -102,6 +102,9 @@ func Migrate(db *sql.DB) {
 			like_count INT DEFAULT 0 CHECK (like_count >= 0),
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES comments(id) ON DELETE CASCADE`,
+		`ALTER TABLE comments ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_id)`,
 		`CREATE TABLE IF NOT EXISTS hashtags (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			name VARCHAR(100) UNIQUE NOT NULL,
@@ -152,6 +155,45 @@ func Migrate(db *sql.DB) {
 		`CREATE INDEX IF NOT EXISTS idx_shared_videos_user_id ON shared_videos(user_id)`,
 		// admin role column on users
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false`,
+		// search history
+		`CREATE TABLE IF NOT EXISTS search_history (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			query      TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_search_history_user_id ON search_history(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_search_history_created_at ON search_history(created_at DESC)`,
+		// notifications
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			actor_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+			type       VARCHAR(50) NOT NULL,
+			video_id   UUID REFERENCES videos(id) ON DELETE CASCADE,
+			message    TEXT NOT NULL DEFAULT '',
+			is_read    BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC)`,
+		// creator communication preferences
+		`CREATE TABLE IF NOT EXISTS creator_settings (
+			user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			messages_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		// simple direct message outbox
+		`CREATE TABLE IF NOT EXISTS direct_messages (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			from_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			to_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			content TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_direct_messages_to_user_id ON direct_messages(to_user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_direct_messages_from_user_id ON direct_messages(from_user_id)`,
 	}
 
 	for _, q := range queries {

@@ -4,6 +4,10 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root {
+  --mobile-bottom-nav-height: calc(56px + env(safe-area-inset-bottom));
+}
+
 body {
   background-color: #161823;
   color: #fff;
@@ -16,19 +20,49 @@ body {
 ::-webkit-scrollbar-thumb { background: #2D2F3E; border-radius: 2px; }
 
 .video-feed-container {
-  height: 100dvh;
+  height: calc(100dvh - var(--mobile-bottom-nav-height));
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
   scrollbar-width: none;
 }
 .video-feed-container::-webkit-scrollbar { display: none; }
 
+/* On desktop (md+), no bottom nav - use full height */
+@media (min-width: 768px) {
+  :root {
+    --mobile-bottom-nav-height: 0px;
+  }
+
+  .video-feed-container {
+    height: 100dvh;
+  }
+}
+
 .video-item {
-  height: 100dvh;
+  height: calc(100dvh - var(--mobile-bottom-nav-height));
   scroll-snap-align: start;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #000;
+}
+
+.video-safe-bottom {
+  padding-bottom: var(--mobile-bottom-nav-height);
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .video-item {
+    height: 100dvh;
+  }
 }

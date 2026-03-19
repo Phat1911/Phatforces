@@ -5,13 +5,22 @@ import { Video } from '@/lib/store';
 import { videoController } from '@/lib/videoController';
 import { AiFillHeart, AiOutlineHeart, AiOutlineComment, AiOutlineShareAlt } from 'react-icons/ai';
 import { BsMusicNote, BsVolumeMute, BsVolumeUp } from 'react-icons/bs';
-import { IoBookmarkOutline, IoBookmark, IoClose, IoCopyOutline, IoLogoWhatsapp, IoLogoFacebook } from 'react-icons/io5';
+import { IoBookmarkOutline, IoBookmark, IoClose, IoCopyOutline, IoLogoWhatsapp, IoLogoFacebook, IoTrash } from 'react-icons/io5';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import Cookies from 'js-cookie';
+import { decodeJwtPayload } from '@/lib/jwt';
 
 interface Props { video: Video; isActive: boolean; onAuthRequired: () => void; }
-interface Comment { id: string; content: string; author: { username: string; avatar_url: string }; created_at: string; }
+interface Comment {
+  id: string;
+  content: string;
+  image_url?: string;
+  parent_id?: string;
+  replies?: Comment[];
+  author: { username: string; avatar_url: string };
+  created_at: string;
+}
 
 export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
   // Memoized callback ref - fires synchronously on DOM insert (before IO can fire).
@@ -36,7 +45,12 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
   const [showShare, setShowShare] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState('');
+  const [commentImage, setCommentImage] = useState<File | null>(null);
+  const [commentImagePreview, setCommentImagePreview] = useState('');
+  const [replyTo, setReplyTo] = useState<Comment | null>(null);
+  const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({});
   const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentCount, setCommentCount] = useState(video.comment_count || 0);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -50,6 +64,14 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
   const lastTapRef = useRef(0);
   const viewRecordedRef = useRef(false);
   const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (commentImagePreview) {
+        URL.revokeObjectURL(commentImagePreview);
+      }
+    };
+  }, [commentImagePreview]);
 
   // isActive drives UI only: mute icon sync, paused reset, view tracking.
   // Actual play/pause/mute is owned by videoController.activate() called
@@ -244,16 +266,76 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
     finally { setCommentsLoading(false); }
   };
 
+  const onCommentImageChange = (file: File | null) => {
+    if (commentImagePreview) {
+      URL.revokeObjectURL(commentImagePreview);
+      setCommentImagePreview('');
+    }
+    setCommentImage(file);
+    if (file) {
+      setCommentImagePreview(URL.createObjectURL(file));
+    }
+  };
+
   const submitComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!Cookies.get('photcot_token')) { onAuthRequired(); return; }
-    if (!commentText.trim()) return;
+    if (!commentText.trim() && !commentImage) return;
     try {
-      const res = await api.post(`/videos/${video.id}/comments`, { content: commentText });
-      setComments(prev => [res.data, ...prev]);
+      const form = new FormData();
+      if (commentText.trim()) form.append('content', commentText.trim());
+      if (commentImage) form.append('image', commentImage);
+      if (replyTo?.id) form.append('parent_id', replyTo.id);
+
+      const res = await api.post(`/videos/${video.id}/comments`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      const created = res.data as Comment;
+      setComments(prev => {
+        if (created.parent_id) {
+          return prev.map((cm) => cm.id === created.parent_id
+            ? { ...cm, replies: [created, ...(cm.replies || [])] }
+            : cm);
+        }
+        return [created, ...prev];
+      });
+      // Increment comment count for top-level comments
+      if (!created.parent_id) {
+        setCommentCount(prev => prev + 1);
+      }
       setCommentText('');
+      onCommentImageChange(null);
+      setReplyTo(null);
       toast.success('Comment posted!');
     } catch { toast.error('Failed to post comment'); }
+  };
+
+  const deleteComment = async (commentId: string, isReply: boolean, parentId?: string) => {
+    try {
+      await api.delete(`/videos/${video.id}/comments/${commentId}`);
+      
+      if (isReply && parentId) {
+        // Remove reply from parent
+        setComments(prev => prev.map(cm => 
+          cm.id === parentId
+            ? { ...cm, replies: (cm.replies || []).filter(rp => rp.id !== commentId) }
+            : cm
+        ));
+      } else {
+        // Remove top-level comment
+        setComments(prev => prev.filter(cm => cm.id !== commentId));
+        setCommentCount(prev => Math.max(0, prev - 1));
+      }
+      toast.success('Comment deleted');
+    } catch { toast.error('Failed to delete comment'); }
+  };
+
+  const getCurrentUsername = () => {
+    const token = Cookies.get('photcot_token');
+    if (!token) return null;
+    const payload = decodeJwtPayload(token);
+    return payload?.username as string | null;
   };
 
   const videoShareUrl = typeof window !== 'undefined'
@@ -312,7 +394,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
     }
     lastTapRef.current = now;
 
-    const isPaused = videoController.togglePlayPause(video.id);
+    const isPaused = videoController.togglePlayPause(ctrlKey);
     setPaused(isPaused);
   };
 
@@ -371,7 +453,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
       <div
         className="absolute bottom-0 left-0 right-0 z-20 px-0 pb-0 select-none"
         data-action-btn="true"
-        style={{ touchAction: 'none' }}
+        style={{ bottom: 'var(--mobile-bottom-nav-height)', touchAction: 'none' }}
       >
         {/* Time display - shown while seeking or on hover */}
         {(showTime || isSeeking) && duration > 0 && (
@@ -408,9 +490,9 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
       </div>
 
       {/* Bottom info */}
-      <div className="absolute bottom-2 left-0 right-16 p-4" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
+      <div className="absolute left-0 right-16 p-4 md:bottom-2" style={{ bottom: 'calc(var(--mobile-bottom-nav-height) + 0.5rem)', background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
         <Link
-          href={`/@${video.author?.username}`}
+          href={`/${video.author?.username}`}
           className="flex items-center gap-2 mb-2"
           onClick={e => e.stopPropagation()}
         >
@@ -438,9 +520,9 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
       </div>
 
       {/* Action buttons */}
-      <div className="absolute right-2 bottom-16 flex flex-col items-center gap-4">
+      <div className="absolute right-2 md:bottom-16 flex flex-col items-center gap-4" style={{ bottom: 'calc(var(--mobile-bottom-nav-height) + 3.5rem)' }}>
         {/* Avatar */}
-        <Link href={`/@${video.author?.username}`} onClick={e => e.stopPropagation()}>
+        <Link href={`/${video.author?.username}`} onClick={e => e.stopPropagation()}>
           <div className="relative">
             <div className="w-12 h-12 rounded-full overflow-hidden ring-2 ring-white shadow-xl flex items-center justify-center text-white font-bold">
               {video.author?.avatar_url
@@ -481,7 +563,7 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
           <div className="w-12 h-12 rounded-full flex items-center justify-center bg-black/30 backdrop-blur-sm border border-white/10 shadow-lg group-hover:scale-110 transition-transform">
             <AiOutlineComment size={26} className="text-white drop-shadow" />
           </div>
-          <span className="text-xs font-bold text-white drop-shadow">{fmt(video.comment_count || 0)}</span>
+          <span className="text-xs font-bold text-white drop-shadow">{fmt(commentCount)}</span>
         </button>
 
         {/* Save / Bookmark */}
@@ -520,54 +602,171 @@ export default function VideoCard({ video, isActive, onAuthRequired }: Props) {
 
       {/* Comments drawer */}
       {showComments && (
-        <div className="absolute inset-0 z-40 flex flex-col justify-end"
+        <div
+          className="absolute inset-0 z-40 flex flex-col justify-end"
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-          onClick={(e) => { e.stopPropagation(); setShowComments(false); }}>
-          <div className="rounded-t-3xl max-h-[72vh] flex flex-col"
+          onClick={(e) => { e.stopPropagation(); setShowComments(false); }}
+        >
+          <div
+            className="rounded-t-3xl max-h-[78vh] md:max-h-[72vh] flex flex-col"
             style={{ background: 'linear-gradient(180deg, #1a1b2e 0%, #161823 100%)', border: '1px solid rgba(255,255,255,0.08)', borderBottom: 'none' }}
-            onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8">
-              <span className="text-white font-bold">{fmt(video.comment_count || 0)} comments</span>
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-3 md:px-4 py-3 border-b border-white/8">
+              <span className="text-white font-bold">{fmt(commentCount)} comments</span>
               <button onClick={() => setShowComments(false)} className="text-gray-400 hover:text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors">
                 <IoClose size={20} />
               </button>
             </div>
-            <div className="overflow-y-auto flex-1 px-4 py-2 space-y-3 min-h-[100px]">
+
+            <div className="overflow-y-auto flex-1 px-3 md:px-4 py-2 space-y-2.5 min-h-[100px]">
               {commentsLoading && <div className="text-center text-gray-400 py-4">Loading...</div>}
               {!commentsLoading && comments.length === 0 && (
                 <div className="text-center text-gray-400 py-6">No comments yet. Be first!</div>
               )}
+
               {comments.map(cm => (
-                <div key={cm.id} className="flex gap-3 py-1">
-                  <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white shadow"
-                    style={{ background: 'linear-gradient(135deg, #FE2C55, #ff8c00)' }}>
-                    {cm.author?.username?.[0]?.toUpperCase()}
+                <div key={cm.id} className="py-1">
+                  <div className="flex gap-2.5 md:gap-3">
+                    <div
+                      className="w-7 h-7 md:w-8 md:h-8 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] md:text-xs font-bold text-white shadow"
+                      style={{ background: 'linear-gradient(135deg, #FE2C55, #ff8c00)' }}
+                    >
+                      {cm.author?.username?.[0]?.toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-white text-xs font-bold mr-2">@{cm.author?.username}</span>
+                      <span className="text-gray-200 text-[13px] md:text-sm">{cm.content}</span>
+                      {cm.image_url && (
+                        <img src={getThumbUrl(cm.image_url)} alt="comment" className="mt-2 rounded-xl max-h-40 w-auto border border-white/10" />
+                      )}
+
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setReplyTo(cm)}
+                          className="text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
+                        >
+                          Reply
+                        </button>
+                        {(cm.replies || []).length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedReplies(prev => ({ ...prev, [cm.id]: !(prev[cm.id] ?? true) }))}
+                            className="text-xs text-gray-400 hover:text-gray-200"
+                          >
+                            {(expandedReplies[cm.id] ?? true) ? `Hide replies (${(cm.replies || []).length})` : `Show replies (${(cm.replies || []).length})`}
+                          </button>
+                        )}
+                        {getCurrentUsername() === cm.author?.username && (
+                          <button
+                            type="button"
+                            onClick={() => deleteComment(cm.id, false)}
+                            className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+                          >
+                            <IoTrash size={12} /> Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-white text-xs font-bold mr-2">@{cm.author?.username}</span>
-                    <span className="text-gray-200 text-sm">{cm.content}</span>
-                  </div>
+
+                  {(expandedReplies[cm.id] ?? true) && (cm.replies || []).map((rp) => (
+                    <div key={rp.id} className="flex gap-2.5 md:gap-3 mt-2 ml-8">
+                      <div
+                        className="w-6 h-6 md:w-7 md:h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[9px] md:text-[10px] font-bold text-white shadow"
+                        style={{ background: 'linear-gradient(135deg, #6378ff, #8f66ff)' }}
+                      >
+                        {rp.author?.username?.[0]?.toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-white text-[11px] md:text-xs font-bold mr-2">@{rp.author?.username}</span>
+                        <span className="text-gray-200 text-[13px] md:text-sm">{rp.content}</span>
+                        {rp.image_url && (
+                          <img src={getThumbUrl(rp.image_url)} alt="reply" className="mt-2 rounded-xl max-h-36 w-auto border border-white/10" />
+                        )}
+                        {getCurrentUsername() === rp.author?.username && (
+                          <div className="mt-1.5">
+                            <button
+                              type="button"
+                              onClick={() => deleteComment(rp.id, true, cm.id)}
+                              className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+                            >
+                              <IoTrash size={12} /> Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
-            <form onSubmit={submitComment} className="flex gap-2 px-4 py-3 border-t border-white/8">
-              <input
-                value={commentText}
-                onChange={e => setCommentText(e.target.value)}
-                placeholder="Add a comment..."
-                className="flex-1 rounded-full px-4 py-2 text-white text-sm focus:outline-none"
-                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-              />
-              <button type="submit"
-                className="px-4 py-2 text-white text-sm font-bold rounded-full transition-all hover:brightness-110 active:scale-95"
-                style={{ background: 'linear-gradient(135deg, #FE2C55, #ff4070)' }}>
-                Post
-              </button>
+
+            <form onSubmit={submitComment} className="px-3 md:px-4 py-3 border-t border-white/8">
+              {replyTo && (
+                <div className="mb-2 flex items-center justify-between rounded-lg bg-[#22253a] px-3 py-1.5 text-xs text-gray-300">
+                  <span>Replying to @{replyTo.author?.username}</span>
+                  <button type="button" onClick={() => setReplyTo(null)} className="text-gray-400 hover:text-white">Cancel</button>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 md:gap-2 mb-2 overflow-x-auto no-scrollbar">
+                {['😀', '😂', '😍', '🔥', '👍', '🎉', '🙏', '❤️'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => setCommentText((prev) => `${prev}${emoji}`)}
+                    className="text-lg hover:scale-110 transition-transform"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+
+              {commentImagePreview && (
+                <div className="mb-2 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 py-2">
+                  <img src={commentImagePreview} alt="preview" className="w-14 h-14 rounded-lg object-cover" />
+                  <div className="text-xs text-gray-300 max-w-[130px] truncate">{commentImage?.name || 'Selected image'}</div>
+                  <button
+                    type="button"
+                    onClick={() => onCommentImageChange(null)}
+                    className="text-gray-400 hover:text-white text-xs px-2"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  value={commentText}
+                  onChange={e => setCommentText(e.target.value)}
+                  placeholder="Add a comment..."
+                  className="flex-1 rounded-full px-4 py-2 text-white text-sm focus:outline-none"
+                  style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+                />
+                <label className="px-3 py-2 rounded-full text-xs font-bold text-white cursor-pointer" style={{ background: 'rgba(255,255,255,0.12)' }}>
+                  Photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => onCommentImageChange(e.target.files?.[0] || null)}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-white text-sm font-bold rounded-full transition-all hover:brightness-110 active:scale-95"
+                  style={{ background: 'linear-gradient(135deg, #FE2C55, #ff4070)' }}
+                >
+                  Post
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
-
       {/* Share sheet - TikTok style */}
       {showShare && (
         <div

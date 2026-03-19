@@ -51,9 +51,12 @@ type Comment struct {
 	ID        string    `json:"id"`
 	VideoID   string    `json:"video_id"`
 	UserID    string    `json:"user_id"`
+	ParentID  *string   `json:"parent_id,omitempty"`
 	Author    *User     `json:"author,omitempty"`
 	Content   string    `json:"content"`
+	ImageURL  string    `json:"image_url,omitempty"`
 	LikeCount int       `json:"like_count"`
+	Replies   []Comment `json:"replies,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -69,6 +72,6 @@ type RegisterRequest struct {
 }
 
 type AuthResponse struct {
-	Token   string `json:"token"`
-	User    *User  `json:"user"`
+	Token string `json:"token"`
+	User  *User  `json:"user"`
 }

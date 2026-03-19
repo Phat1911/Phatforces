@@ -3,19 +3,19 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"photcot/internal/config"
 	"photcot/internal/models"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/lib/pq"
-	"github.com/redis/go-redis/v9"
+	"strconv"
+	"strings"
 )
 
 type VideoHandler struct {
@@ -217,6 +217,13 @@ func (h *VideoHandler) Like(c *gin.Context) {
 	}
 	if count > 0 {
 		h.db.Exec(`UPDATE videos SET like_count = like_count + 1 WHERE id = $1`, videoID)
+		// Notification + recommender signal
+		actorUsername, videoOwnerID, videoTitle := GetActorInfo(h.db, fmt.Sprintf("%v", userID), videoID)
+		if videoOwnerID != "" {
+			msg := fmt.Sprintf("%s liked your video \"%.40s\"", actorUsername, videoTitle)
+			CreateNotification(h.db, videoOwnerID, fmt.Sprintf("%v", userID), "like", &videoID, msg)
+			SendLikeSignal(fmt.Sprintf("%v", userID), videoID)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "liked"})
 }
@@ -291,6 +298,13 @@ func (h *VideoHandler) SaveVideo(c *gin.Context) {
 	}
 	if count > 0 {
 		h.db.Exec(`UPDATE videos SET save_count = save_count + 1 WHERE id = $1`, videoID)
+		// Notification + signal for new saves
+		actorUsername, videoOwnerID, videoTitle := GetActorInfo(h.db, fmt.Sprintf("%v", userID), videoID)
+		if videoOwnerID != "" {
+			msg := fmt.Sprintf("%s saved your video \"%.40s\"", actorUsername, videoTitle)
+			CreateNotification(h.db, videoOwnerID, fmt.Sprintf("%v", userID), "save", &videoID, msg)
+			SendSaveSignal(fmt.Sprintf("%v", userID), videoID)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "saved", "inserted": count > 0})
 }
@@ -334,7 +348,7 @@ func (h *VideoHandler) GetSavedVideos(c *gin.Context) {
 
 	rows, err := h.db.Query(`
 		SELECT v.id, v.user_id, v.title, v.description, v.video_url, v.thumbnail_url,
-			v.duration, v.view_count, v.like_count, v.comment_count, v.share_count,
+			v.duration, v.view_count, v.like_count, v.comment_count, v.share_count, v.save_count,
 			v.hashtags, v.created_at,
 			u.username, u.display_name, u.avatar_url, u.is_verified, u.follower_count
 		FROM saved_videos s
@@ -355,7 +369,7 @@ func (h *VideoHandler) GetSavedVideos(c *gin.Context) {
 		var v models.Video
 		var a models.User
 		if err := rows.Scan(&v.ID, &v.UserID, &v.Title, &v.Description, &v.VideoURL, &v.ThumbnailURL,
-			&v.Duration, &v.ViewCount, &v.LikeCount, &v.CommentCount, &v.ShareCount,
+			&v.Duration, &v.ViewCount, &v.LikeCount, &v.CommentCount, &v.ShareCount, &v.SaveCount,
 			pq.Array(&v.Hashtags), &v.CreatedAt,
 			&a.Username, &a.DisplayName, &a.AvatarURL, &a.IsVerified, &a.FollowerCount); err != nil {
 			continue
@@ -371,7 +385,6 @@ func (h *VideoHandler) GetSavedVideos(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"videos": videos, "page": page})
 }
-
 
 // ShareVideo records that the current user shared this video.
 // Increments share_count, upserts into shared_videos, returns updated count.
@@ -465,7 +478,9 @@ func (h *VideoHandler) GetSharedVideos(c *gin.Context) {
 func (h *VideoHandler) GetUserVideos(c *gin.Context) {
 	userID := c.Param("id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 { page = 1 }
+	if page < 1 {
+		page = 1
+	}
 	limit := 20
 	offset := (page - 1) * limit
 

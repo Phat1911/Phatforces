@@ -309,7 +309,7 @@ function HomePage() {
                 className="video-item video-placeholder"
                 data-video-id={video.instanceId || video.id}
                 data-index={String(idx)}
-                style={{ height: '100dvh', maxWidth: '420px', margin: '0 auto' }}
+                style={{ maxWidth: '420px', margin: '0 auto' }}
               />
             );
           })}

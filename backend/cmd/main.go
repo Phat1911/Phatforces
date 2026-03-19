@@ -60,9 +60,11 @@ func main() {
 			public.GET("/search", searchHandler.Search)
 			public.GET("/search/trending", searchHandler.Trending)
 
-			userHandler := handlers.NewUserHandler(database, nil)
+			userHandler := handlers.NewUserHandler(database, nil, cfg.JWTSecret)
 			public.GET("/users/:username", userHandler.GetProfile)
 			public.GET("/u/:id/videos", handlers.NewVideoHandler(database, nil, cfg).GetUserVideos)
+			creatorSettings := handlers.NewCreatorSettingsHandler(database)
+			public.GET("/creator/settings/:id", creatorSettings.GetCreatorSettings)
 		}
 
 		// Protected routes
@@ -92,10 +94,17 @@ func main() {
 			protected.POST("/videos/:id/share", videoHandler.ShareVideo)
 
 			// Comments
-			commentHandler := handlers.NewCommentHandler(database)
+			commentHandler := handlers.NewCommentHandler(database, cfg)
 			protected.POST("/videos/:id/comments", commentHandler.AddComment)
 			protected.GET("/videos/:id/comments", commentHandler.GetComments)
 			protected.DELETE("/comments/:id", commentHandler.DeleteComment)
+
+			// Creator settings + messages
+			creatorSettings := handlers.NewCreatorSettingsHandler(database)
+			protected.GET("/creator/settings/me", creatorSettings.GetMySettings)
+			protected.PATCH("/creator/settings/me", creatorSettings.UpdateMySettings)
+			messageHandler := handlers.NewMessageHandler(database)
+			protected.POST("/messages", messageHandler.SendMessage)
 
 			// Feed (personalized - requires auth)
 			feedHandlerAuth := handlers.NewFeedHandler(database, rdb)
@@ -117,6 +126,21 @@ func main() {
 			protected.GET("/admin/videos", adminHandler.ListVideos)
 			protected.DELETE("/admin/videos/:id", adminHandler.DeleteVideo)
 			protected.PATCH("/admin/videos/:id/publish", adminHandler.ToggleVideoPublish)
+
+			// Search history (authenticated)
+			searchHistHandler := handlers.NewSearchHandler(database, cfg.JWTSecret)
+			protected.POST("/search/history", searchHistHandler.SaveSearchHistory)
+			protected.GET("/search/history", searchHistHandler.GetSearchHistory)
+			protected.DELETE("/search/history/:id", searchHistHandler.DeleteSearchHistory)
+			protected.DELETE("/search/history", searchHistHandler.ClearSearchHistory)
+
+			// Notifications (authenticated)
+			notifHandler := handlers.NewNotificationHandler(database)
+			protected.GET("/notifications", notifHandler.GetNotifications)
+			protected.GET("/notifications/unread", notifHandler.GetUnreadCount)
+			protected.PATCH("/notifications/read", notifHandler.MarkAllRead)
+			protected.PATCH("/notifications/:id/read", notifHandler.MarkOneRead)
+			protected.DELETE("/notifications/:id", notifHandler.DeleteNotification)
 		}
 	}
 

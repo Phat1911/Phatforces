@@ -2,9 +2,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { AiFillHome, AiOutlineHome, AiOutlineSearch, AiOutlinePlusSquare } from 'react-icons/ai';
+import { AiFillHome, AiOutlineHome, AiOutlineSearch, AiOutlinePlusSquare, AiOutlineBell, AiFillBell } from 'react-icons/ai';
 import { BsPerson, BsPersonFill } from 'react-icons/bs';
 import { MdOutlineExplore, MdAdminPanelSettings } from 'react-icons/md';
+import { api } from '@/lib/api';
+import { decodeJwtPayload } from '@/lib/jwt';
 import Cookies from 'js-cookie';
 
 interface Props { onAuthRequired: () => void; }
@@ -13,18 +15,18 @@ export default function Sidebar({ onAuthRequired }: Props) {
   const pathname = usePathname();
   const [loggedIn, setLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     const checkAuth = () => {
       const token = Cookies.get('photcot_token');
       setLoggedIn(!!token);
       if (token) {
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          setIsAdmin(!!payload.is_admin);
-        } catch { setIsAdmin(false); }
+        const payload = decodeJwtPayload(token);
+        setIsAdmin(!!payload?.is_admin);
       } else {
         setIsAdmin(false);
+        setUnread(0);
       }
     };
     checkAuth();
@@ -35,6 +37,19 @@ export default function Sidebar({ onAuthRequired }: Props) {
       window.removeEventListener('photcot:auth-expired', checkAuth);
     };
   }, []);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    const fetchUnread = async () => {
+      try {
+        const res = await api.get('/notifications/unread');
+        setUnread(res.data.unread_count || 0);
+      } catch { }
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    return () => clearInterval(interval);
+  }, [loggedIn]);
 
   const handleProtected = (e: React.MouseEvent) => {
     if (!Cookies.get('photcot_token')) { e.preventDefault(); onAuthRequired(); }
@@ -49,6 +64,15 @@ export default function Sidebar({ onAuthRequired }: Props) {
       <NavItem href="/explore" icon={<MdOutlineExplore size={26}/>} activeIcon={<MdOutlineExplore size={26}/>} label="Explore" active={pathname === '/explore'} />
       <NavItem href="/search" icon={<AiOutlineSearch size={26}/>} activeIcon={<AiOutlineSearch size={26}/>} label="Search" active={pathname === '/search'} />
       <NavItem href="/upload" icon={<AiOutlinePlusSquare size={26}/>} activeIcon={<AiOutlinePlusSquare size={26}/>} label="Upload" active={pathname === '/upload'} onClick={handleProtected} />
+      <NavItem
+        href="/notifications"
+        icon={<AiOutlineBell size={26}/>}
+        activeIcon={<AiFillBell size={26}/>}
+        label="Inbox"
+        active={pathname === '/notifications'}
+        onClick={handleProtected}
+        badge={unread}
+      />
       <NavItem href="/profile" icon={<BsPerson size={26}/>} activeIcon={<BsPersonFill size={26}/>} label="Profile" active={pathname === '/profile'} onClick={handleProtected} />
       {isAdmin && (
         <NavItem href="/admin" icon={<MdAdminPanelSettings size={26}/>} activeIcon={<MdAdminPanelSettings size={26}/>} label="Admin" active={pathname === '/admin'} />
@@ -73,14 +97,22 @@ export default function Sidebar({ onAuthRequired }: Props) {
   );
 }
 
-function NavItem({ href, icon, activeIcon, label, active, onClick }: {
+function NavItem({ href, icon, activeIcon, label, active, onClick, badge }: {
   href: string; icon: React.ReactNode; activeIcon: React.ReactNode;
   label: string; active: boolean; onClick?: (e: React.MouseEvent) => void;
+  badge?: number;
 }) {
   return (
     <Link href={href} onClick={onClick}
       className={`flex items-center gap-3 px-2 py-3 rounded-lg transition-colors hover:bg-[#1F2030] ${active ? 'font-bold text-white bg-[#1F2030]' : 'text-gray-400'}`}>
-      {active ? activeIcon : icon}
+      <div className="relative">
+        {active ? activeIcon : icon}
+        {badge != null && badge > 0 && (
+          <span className="absolute -top-1.5 -right-1.5 bg-[#FE2C55] text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+            {badge > 9 ? '9+' : badge}
+          </span>
+        )}
+      </div>
       <span className="text-base">{label}</span>
     </Link>
   );

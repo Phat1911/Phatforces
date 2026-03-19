@@ -2,30 +2,69 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
+	"strings"
 	"photcot/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 )
 
 type UserHandler struct {
-	db  *sql.DB
-	rdb *redis.Client
+	db        *sql.DB
+	rdb       *redis.Client
+	jwtSecret string
 }
 
-func NewUserHandler(db *sql.DB, rdb *redis.Client) *UserHandler {
-	return &UserHandler{db: db, rdb: rdb}
+func NewUserHandler(db *sql.DB, rdb *redis.Client, jwtSecret ...string) *UserHandler {
+	secret := ""
+	if len(jwtSecret) > 0 {
+		secret = jwtSecret[0]
+	}
+	return &UserHandler{db: db, rdb: rdb, jwtSecret: secret}
+}
+
+// tryGetUserID extracts user_id from context (set by auth middleware) OR
+// parses it directly from the Bearer token - for optional-auth public routes.
+func (h *UserHandler) tryGetUserID(c *gin.Context) string {
+	if uid, ok := c.Get("user_id"); ok && uid != nil {
+		return fmt.Sprintf("%v", uid)
+	}
+	if h.jwtSecret == "" {
+		return ""
+	}
+	header := c.GetHeader("Authorization")
+	if !strings.HasPrefix(header, "Bearer ") {
+		return ""
+	}
+	tokenStr := strings.TrimPrefix(header, "Bearer ")
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected alg")
+		}
+		return []byte(h.jwtSecret), nil
+	})
+	if err != nil || !token.Valid {
+		return ""
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return ""
+	}
+	uid, _ := claims["user_id"].(string)
+	return uid
 }
 
 func (h *UserHandler) GetProfile(c *gin.Context) {
 	username := c.Param("username")
-	currentUserID, _ := c.Get("user_id")
+	currentUserID := h.tryGetUserID(c)
 
 	var user models.User
 	err := h.db.QueryRow(`
 		SELECT id, username, display_name, bio, avatar_url, is_verified,
 			follower_count, following_count, total_likes, created_at
-		FROM users WHERE username = $1 AND is_admin = false
+		FROM users WHERE username = $1
 	`, username).Scan(
 		&user.ID, &user.Username, &user.DisplayName, &user.Bio,
 		&user.AvatarURL, &user.IsVerified, &user.FollowerCount,
@@ -37,7 +76,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	}
 
 	// Check if current user follows this user
-	if currentUserID != nil {
+	if currentUserID != "" {
 		var count int
 		h.db.QueryRow(`SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND following_id=$2`,
 			currentUserID, user.ID).Scan(&count)
@@ -96,6 +135,12 @@ func (h *UserHandler) Follow(c *gin.Context) {
 	if inserted > 0 {
 		h.db.Exec(`UPDATE users SET follower_count = follower_count + 1 WHERE id = $1`, followingID)
 		h.db.Exec(`UPDATE users SET following_count = following_count + 1 WHERE id = $1`, followerID)
+		// Notification + recommender signal
+		var actorName string
+		h.db.QueryRow(`SELECT username FROM users WHERE id=$1`, followerID).Scan(&actorName)
+		msg := fmt.Sprintf("%s started following you", actorName)
+		CreateNotification(h.db, fmt.Sprintf("%v", followingID), fmt.Sprintf("%v", followerID), "follow", nil, msg)
+		SendFollowSignal(fmt.Sprintf("%v", followerID), fmt.Sprintf("%v", followingID))
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "followed"})
 }
