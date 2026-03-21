@@ -26,7 +26,14 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('photcot:auth-expired'));
+        // Only fire auth-expired if we had a token (it expired).
+        // If no token, the user was just not logged in - no forced re-login.
+        const hadToken = !!localStorage.getItem('photcot_token');
+        if (hadToken) {
+          localStorage.removeItem('photcot_token');
+          localStorage.removeItem('photcot_user');
+          window.dispatchEvent(new CustomEvent('photcot:auth-expired'));
+        }
       }
     }
     return Promise.reject(err);

@@ -120,20 +120,13 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     };
   }, [commentImagePreview]);
 
-  // Check if user is logged in by making a simple API call
+  // Check if user is logged in from localStorage (fast, no network call)
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        await api.get('/notifications/unread');
-        setLoggedIn(true);
-      } catch (e) {
-        if ((e as any)?.response?.status === 401) {
-          setLoggedIn(false);
-        }
-      }
+    const checkAuth = () => {
+      const token = localStorage.getItem('photcot_token');
+      setLoggedIn(!!token);
     };
     checkAuth();
-    // Listen to auth change events
     const onAuthChange = () => checkAuth();
     window.addEventListener('photcot:auth-changed', onAuthChange);
     window.addEventListener('photcot:auth-expired', () => setLoggedIn(false));
