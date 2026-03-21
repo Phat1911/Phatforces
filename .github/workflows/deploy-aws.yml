@@ -45,7 +45,12 @@ jobs:
           ECR_REPO: ${{ secrets.ECR_FRONTEND_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPO:latest ./frontend
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=https://phatforces.me/api/v1 \
+            --build-arg NEXT_PUBLIC_UPLOADS_URL=https://phatforces.me \
+            -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPO:latest \
+            ./frontend
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:latest
 
