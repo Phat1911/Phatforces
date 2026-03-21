@@ -1,16 +1,9 @@
-name: Deploy To AWS
+name: Deploy To Azure
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
-permissions:
-  id-token: write
-  contents: read
-
-env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
 
 jobs:
   build-and-deploy:
@@ -19,80 +12,55 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Login to Azure Container Registry
+        uses: docker/login-action@v3
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+          registry: photcotregistry.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build & push backend image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPO: ${{ secrets.ECR_BACKEND_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPO:latest ./backend
-          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPO:latest
+          docker build -t photcotregistry.azurecr.io/photcot-backend:latest ./backend
+          docker push photcotregistry.azurecr.io/photcot-backend:latest
 
       - name: Build & push frontend image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPO: ${{ secrets.ECR_FRONTEND_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build \
-            --build-arg NEXT_PUBLIC_API_URL=https://phatforces.me/api/v1 \
-            --build-arg NEXT_PUBLIC_UPLOADS_URL=https://phatforces.me \
-            -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
-            -t $ECR_REGISTRY/$ECR_REPO:latest \
+            --build-arg NEXT_PUBLIC_API_URL=https://api.phatforces.me/api/v1 \
+            --build-arg NEXT_PUBLIC_UPLOADS_URL=https://api.phatforces.me \
+            -t photcotregistry.azurecr.io/photcot-frontend:latest \
             ./frontend
-          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPO:latest
+          docker push photcotregistry.azurecr.io/photcot-frontend:latest
 
-      - name: Copy deployment files to EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "deploy/"
-          target: "${{ secrets.EC2_PROJECT_PATH }}"
-          strip_components: 0
-
-      - name: Deploy on EC2
+      - name: Deploy on Azure VM
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          envs: IMAGE_TAG,AWS_REGION,AWS_ACCOUNT_ID
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            set -euo pipefail
-            cd ${{ secrets.EC2_PROJECT_PATH }}/deploy
+            set -e
+            ACR="photcotregistry.azurecr.io"
+            echo "${{ secrets.ACR_PASSWORD }}" | docker login $ACR -u "${{ secrets.ACR_USERNAME }}" --password-stdin
 
-            if [ ! -f .env.prod ]; then
-              echo "ERROR: deploy/.env.prod missing on server. Run first_bootstrap.sh first."
-              exit 1
-            fi
+            docker pull $ACR/photcot-backend:latest
+            docker stop photcot-backend && docker rm photcot-backend
+            docker run -d --name photcot-backend --restart unless-stopped --network host \
+              --env-file /home/azureuser/photcot/backend/.env \
+              -e PORT=8080 \
+              -v /home/azureuser/photcot/backend/uploads:/app/uploads \
+              $ACR/photcot-backend:latest
 
-            # Update dynamic values
-            sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env.prod
-            sed -i "s/^AWS_REGION=.*/AWS_REGION=${AWS_REGION}/" .env.prod
-            sed -i "s/^AWS_ACCOUNT_ID=.*/AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}/" .env.prod
+            docker pull $ACR/photcot-frontend:latest
+            docker stop photcot-frontend && docker rm photcot-frontend
+            docker run -d --name photcot-frontend --restart unless-stopped --network host \
+              -e NEXT_PUBLIC_API_URL=https://api.phatforces.me/api/v1 \
+              -e NEXT_PUBLIC_UPLOADS_URL=https://api.phatforces.me \
+              -e NODE_ENV=production \
+              $ACR/photcot-frontend:latest
 
-            ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-            grep -q '^ECR_REGISTRY=' .env.prod               && sed -i "s|^ECR_REGISTRY=.*|ECR_REGISTRY=${ECR_REGISTRY}|" .env.prod               || echo "ECR_REGISTRY=${ECR_REGISTRY}" >> .env.prod
-
-            chmod +x deploy.sh
-            ./deploy.sh
-
-            echo "=== Deployment complete. IMAGE_TAG=${IMAGE_TAG} ==="
+            sleep 3
+            curl -s http://localhost:8080/api/health
+            echo ""
+            docker ps --format "table {{.Names}}\t{{.Status}}"
