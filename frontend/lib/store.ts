@@ -42,7 +42,7 @@ export interface Video {
 interface AuthStore {
   user: User | null;
   token: string | null;
-  setAuth: (user: User, token?: string) => void;
+  setAuth: (user: User, token: string) => void;
   clearAuth: () => void;
 }
 
@@ -63,7 +63,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
     if (typeof window !== 'undefined') {
       localStorage.setItem('photcot_user', JSON.stringify(user));
     }
-    set({ user, token: token ?? null });
+    set({ user, token });
   },
   clearAuth: () => {
     if (typeof window !== 'undefined') {

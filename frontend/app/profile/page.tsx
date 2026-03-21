@@ -2,7 +2,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getThumbUrl, getVideoUrl } from '@/lib/api';
+import { decodeJwtPayload } from '@/lib/jwt';
 import { useAuthStore } from '@/lib/store';
+import Cookies from 'js-cookie';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 
@@ -18,20 +20,26 @@ export default function ProfilePage() {
   const router = useRouter();
 
   useEffect(() => {
+    const token = Cookies.get('photcot_token');
+    if (!token) { router.push('/'); return; }
+
     const loadProfile = async () => {
       try {
-        // Use API probe instead of reading HttpOnly cookie
-        const meRes = await api.get('/notifications/unread');
-        // If we get here, user is authenticated - get profile from store user or fetch it
-        const currentUser = user;
-        if (!currentUser) {
+        const payload = decodeJwtPayload(token);
+        if (!payload) {
+          router.push('/');
+          return;
+        }
+        const username = String(payload.username || '');
+        const userId = String(payload.user_id || '');
+        if (!username || !userId) {
           router.push('/');
           return;
         }
 
         const [profileRes, videosRes, statsRes, savedRes, settingsRes] = await Promise.all([
-          api.get(`/users/${currentUser.username}`),
-          api.get(`/u/${currentUser.id}/videos`),
+          api.get(`/users/${username}`),
+          api.get(`/u/${userId}/videos`),
           api.get('/monetization/stats'),
           api.get('/videos/saved').catch(() => ({ data: { videos: [] } })),
           api.get('/creator/settings/me').catch(() => ({ data: { notifications_enabled: true, messages_enabled: true } })),
@@ -46,7 +54,7 @@ export default function ProfilePage() {
           messages_enabled: settingsRes.data.messages_enabled !== false,
         });
 
-        setAuth(profileRes.data);
+        if (!user) setAuth(profileRes.data, token);
       } catch {
         router.push('/');
       }
@@ -54,17 +62,13 @@ export default function ProfilePage() {
     loadProfile();
   }, [router]);
 
-  const handleLogout = async () => {
-    try {
-      // Tell backend to clear the HttpOnly cookie
-      await api.post('/auth/logout').catch(() => {});
-    } finally {
-      clearAuth();
-      window.dispatchEvent(new CustomEvent('photcot:auth-changed'));
-      toast.success('Logged out');
-      router.push('/');
-      window.location.reload();
-    }
+  const handleLogout = () => {
+    Cookies.remove('photcot_token');
+    clearAuth();
+    window.dispatchEvent(new CustomEvent('photcot:auth-changed'));
+    toast.success('Logged out');
+    router.push('/');
+    window.location.reload();
   };
 
   const updateCreatorSetting = async (key: 'notifications_enabled' | 'messages_enabled', value: boolean) => {

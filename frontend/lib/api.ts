@@ -5,14 +5,13 @@ const UPLOADS_URL = process.env.NEXT_PUBLIC_UPLOADS_URL || 'http://localhost:808
 
 export const api = axios.create({
   baseURL: API_URL,
-  withCredentials: true, // Automatically include cookies in all requests
+  withCredentials: true,
 });
 
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      // Token expired or invalid, clear any local state and redirect
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('photcot:auth-expired'));
       }

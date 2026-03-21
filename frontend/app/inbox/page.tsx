@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import toast from 'react-hot-toast';
+import Cookies from 'js-cookie';
 import { api, getThumbUrl } from '@/lib/api';
-import { useAuthStore } from '@/lib/store';
+import { decodeJwtPayload } from '@/lib/jwt';
 
 interface Peer {
   id: string;
@@ -31,9 +32,8 @@ function formatTime(dateStr: string): string {
 function InboxPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useAuthStore();
   const [mounted, setMounted] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [peer, setPeer] = useState<Peer | null>(null);
@@ -48,10 +48,15 @@ function InboxPageContent() {
     return raw.startsWith('@') ? raw.slice(1) : raw;
   }, [searchParams]);
 
-  // Get user ID from store (persisted in localStorage) instead of decoding HttpOnly cookie
-  const myUserID = user?.id ?? '';
+  const myUserID = useMemo(() => {
+    const token = Cookies.get('photcot_token');
+    if (!token) return '';
+    const payload = decodeJwtPayload(token);
+    const id = payload?.user_id;
+    return typeof id === 'string' ? id : '';
+  }, [mounted]);
 
-  const isLoggedIn = () => mounted && loggedIn;
+  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
 
   const fetchConversation = useCallback(async (opts?: { showLoading?: boolean; silent?: boolean }) => {
     const showLoading = opts?.showLoading ?? true;
@@ -84,13 +89,7 @@ function InboxPageContent() {
     }
   }, [mounted, withUsername]);
 
-  useEffect(() => {
-    setMounted(true);
-    // API probe for HttpOnly cookie auth check
-    api.get('/notifications/unread')
-      .then(() => setLoggedIn(true))
-      .catch(() => setLoggedIn(false));
-  }, []);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!mounted) return;

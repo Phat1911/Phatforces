@@ -5,6 +5,7 @@ import { api, getThumbUrl, getVideoUrl } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import { AiOutlineSearch, AiFillPlayCircle, AiFillHeart, AiOutlineClose, AiOutlineDelete } from 'react-icons/ai';
 import { MdHistory } from 'react-icons/md';
+import Cookies from 'js-cookie';
 
 interface HistoryEntry {
   id: string;
@@ -19,21 +20,15 @@ export default function SearchPage() {
   const [followLoading, setFollowLoading] = useState<Record<string, boolean>>({});
   const [mounted, setMounted] = useState(false);
   
-  const [loggedInState, setLoggedInState] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { user } = useAuthStore();
 
-  useEffect(() => {
-    setMounted(true);
-    api.get('/notifications/unread')
-      .then(() => setLoggedInState(true))
-      .catch(() => setLoggedInState(false));
-  }, []);
+  useEffect(() => { setMounted(true); }, []);
 
-  const isLoggedIn = () => mounted && loggedInState;
+  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
 
   // Fetch history when input is focused and user is logged in
   const fetchHistory = async () => {

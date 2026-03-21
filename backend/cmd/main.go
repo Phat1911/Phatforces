@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"time"
 	"photcot/internal/config"
 	"photcot/internal/db"
 	"photcot/internal/handlers"
@@ -24,7 +23,6 @@ func main() {
 
 	// Security middlewares
 	r.Use(middleware.CORS())
-	r.Use(middleware.HTTPS())
 
 	// Static file serving for uploads
 	r.Static("/uploads", cfg.UploadDir)
@@ -37,18 +35,14 @@ func main() {
 	// API routes
 	api := r.Group("/api/v1")
 	{
-		// Rate limiter: 5 requests per minute per IP for auth endpoints
-		authLimiter := middleware.NewRateLimiter(5, 1*time.Minute)
 
 		// Auth (register, login, OTP)
 		auth := api.Group("/auth")
-		auth.Use(middleware.RateLimit(authLimiter))
 		{
 			authHandler := handlers.NewAuthHandler(database, cfg)
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/refresh", authHandler.RefreshToken)
-			auth.POST("/logout", authHandler.Logout)
 
 			// OTP email verification
 			otpHandler := handlers.NewOTPHandler(database, cfg)
@@ -81,7 +75,7 @@ func main() {
 
 		// Protected routes
 		protected := api.Group("")
-		protected.Use(middleware.Auth(cfg.JWTSecret, database))
+		protected.Use(middleware.Auth(cfg.JWTSecret))
 		{
 			// Users (protected mutations)
 			userHandler := handlers.NewUserHandler(database, rdb)

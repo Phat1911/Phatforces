@@ -43,11 +43,6 @@ func (h *OTPHandler) SendOTP(c *gin.Context) {
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
-	if err := validateEmailDomain(req.Email); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
 	// Rate-limit: max 3 OTPs per email per hour
 	var recentCount int
 	h.db.QueryRow(

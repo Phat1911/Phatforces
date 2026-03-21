@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { AiOutlineCloudUpload } from 'react-icons/ai';
+import Cookies from 'js-cookie';
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -14,11 +15,11 @@ export default function UploadPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  // Auth guard - use API probe instead of reading HttpOnly cookie
+  // Auth guard
   useEffect(() => {
-    api.get('/notifications/unread').catch(() => {
+    if (!Cookies.get('photcot_token')) {
       router.push('/');
-    });
+    }
   }, [router]);
 
   // Cleanup object URL on unmount

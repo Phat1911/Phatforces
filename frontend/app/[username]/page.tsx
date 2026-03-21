@@ -5,6 +5,7 @@ import { api, getThumbUrl, getVideoUrl } from '@/lib/api';
 import { User, Video } from '@/lib/store';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
+import Cookies from 'js-cookie';
 
 export default function UserProfilePage() {
   const params = useParams();
@@ -21,16 +22,10 @@ export default function UserProfilePage() {
   const [messageLoading, setMessageLoading] = useState(false);
   const [messagesEnabled, setMessagesEnabled] = useState(true);
   const [mounted, setMounted] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-    api.get('/notifications/unread')
-      .then(() => setLoggedIn(true))
-      .catch(() => setLoggedIn(false));
-  }, []);
+  useEffect(() => { setMounted(true); }, []);
 
-  const isLoggedIn = () => mounted && loggedIn;
+  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
 
   useEffect(() => {
     if (!username) return;

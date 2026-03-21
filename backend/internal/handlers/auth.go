@@ -2,14 +2,13 @@ package handlers
 
 import (
 	"database/sql"
-	"fmt"
-	"net"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
+
 	"photcot/internal/config"
 	"photcot/internal/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -24,30 +23,6 @@ func NewAuthHandler(db *sql.DB, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{db: db, cfg: cfg}
 }
 
-var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
-
-// validateEmailDomain checks format and DNS MX/A records.
-// Exported as package-level so otp.go can also call it.
-func validateEmailDomain(emailAddr string) error {
-	emailAddr = strings.TrimSpace(strings.ToLower(emailAddr))
-	if !emailRegex.MatchString(emailAddr) {
-		return fmt.Errorf("invalid email format")
-	}
-	parts := strings.Split(emailAddr, "@")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid email format")
-	}
-	domain := parts[1]
-	mxRecords, err := net.LookupMX(domain)
-	if err != nil || len(mxRecords) == 0 {
-		addrs, errA := net.LookupHost(domain)
-		if errA != nil || len(addrs) == 0 {
-			return fmt.Errorf("email domain '%s' does not exist or cannot receive mail", domain)
-		}
-	}
-	return nil
-}
-
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req models.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -57,31 +32,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
-	// Step 1: Validate email domain
-	if err := validateEmailDomain(req.Email); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if len(req.Password) < 6 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "password must be at least 6 characters"})
 		return
 	}
 
-	// Step 2: Require a verified OTP for this email
-	var otpID string
-	err := h.db.QueryRow(
-		`SELECT id FROM email_otps WHERE email=$1 AND verified=TRUE AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1`,
-		req.Email,
-	).Scan(&otpID)
-	if err == sql.ErrNoRows {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email not verified, please verify your email first"})
-		return
-	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check email verification"})
-		return
-	}
-	// Consume the OTP so it can't be reused
-	h.db.Exec("DELETE FROM email_otps WHERE id=$1", otpID)
-
-	// Hash password and create account
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
 		return
@@ -103,19 +59,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	token := h.generateToken(user.ID, user.Username, false)
-	
-	// SameSite=None required for cross-origin requests (frontend on phatforces.me, API on api.phatforces.me)
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie(
-		"photcot_token",           // cookie name
-		token,                     // cookie value
-		24*60*60,                  // max age: 24 hours
-		"/",                       // path
-		"",                        // domain (empty = current domain)
-		true,                      // secure (HTTPS only) - required for SameSite=None
-		true,                      // httpOnly
-	)
-	
 	c.JSON(http.StatusCreated, models.AuthResponse{Token: token, User: &user})
 }
 
@@ -150,19 +93,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	token := h.generateToken(user.ID, user.Username, isAdmin)
-	
-	// SameSite=None required for cross-origin requests (frontend on phatforces.me, API on api.phatforces.me)
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie(
-		"photcot_token",           // cookie name
-		token,                     // cookie value
-		24*60*60,                  // max age: 24 hours
-		"/",                       // path
-		"",                        // domain (empty = current domain)
-		true,                      // secure (HTTPS only) - required for SameSite=None
-		true,                      // httpOnly
-	)
-	
 	c.JSON(http.StatusOK, models.AuthResponse{Token: token, User: &user})
 }
 
@@ -181,9 +111,3 @@ func (h *AuthHandler) generateToken(userID, username string, isAdmin bool) strin
 	return token
 }
 
-func (h *AuthHandler) Logout(c *gin.Context) {
-	// Clear the HttpOnly cookie by setting Max-Age to -1
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie("photcot_token", "", -1, "/", "", true, true)
-	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
-}

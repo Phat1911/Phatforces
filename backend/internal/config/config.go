@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+
 	"github.com/joho/godotenv"
 )
 
@@ -32,12 +33,6 @@ func Load() *Config {
 		MaxUpload:  524288000,
 		ResendKey:  getEnv("RESEND_API_KEY", ""),
 		EmailFrom:  getEnv("EMAIL_FROM", "Phatforces <onboarding@resend.dev>"),
-	}
-	if cfg.DBURL == "" {
-		log.Fatal("DB_URL must be set in .env or environment")
-	}
-	if cfg.JWTSecret == "" {
-		log.Fatal("JWT_SECRET must be set in .env or environment")
 	}
 	return cfg
 }
