@@ -1,11 +1,13 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
-const UPLOADS_URL = process.env.NEXT_PUBLIC_UPLOADS_URL || 'http://localhost:8080';
+const isProd = process.env.NODE_ENV === 'production';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || (isProd ? 'https://api.phatforces.me/api/v1' : 'http://localhost:8080/api/v1');
+const UPLOADS_URL = process.env.NEXT_PUBLIC_UPLOADS_URL || (isProd ? 'https://api.phatforces.me' : 'http://localhost:8080');
 
 export const api = axios.create({
   baseURL: API_URL,
-  withCredentials: true,
+  // Use bearer token auth only; avoids browser CORS rejection when server returns wildcard origin.
+  withCredentials: false,
 });
 
 api.interceptors.response.use(
