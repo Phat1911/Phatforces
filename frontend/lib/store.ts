@@ -56,18 +56,25 @@ const loadUserFromStorage = (): User | null => {
   }
 };
 
+const loadTokenFromStorage = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('photcot_token');
+};
+
 export const useAuthStore = create<AuthStore>((set) => ({
   user: loadUserFromStorage(),
-  token: null,
+  token: loadTokenFromStorage(),
   setAuth: (user, token) => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('photcot_user', JSON.stringify(user));
+      localStorage.setItem('photcot_token', token);
     }
     set({ user, token });
   },
   clearAuth: () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('photcot_user');
+      localStorage.removeItem('photcot_token');
     }
     set({ user: null, token: null });
   },

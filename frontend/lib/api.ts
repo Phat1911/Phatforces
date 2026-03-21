@@ -7,8 +7,18 @@ const UPLOADS_URL = cleanUrl(process.env.NEXT_PUBLIC_UPLOADS_URL, isProd ? '' : 
 
 export const api = axios.create({
   baseURL: API_URL,
-  // Use bearer token auth only; avoids browser CORS rejection when server returns wildcard origin.
   withCredentials: false,
+});
+
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('photcot_token');
+    if (token) {
+      config.headers = config.headers ?? {};
+      config.headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+  return config;
 });
 
 api.interceptors.response.use(
