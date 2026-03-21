@@ -1,20 +1,36 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface Props { onClose: () => void; }
 
+type SendCodeResponse = { cooldown_seconds?: number };
+
 type RegisterStep = 'form' | 'otp';
+type LoginStep = 'form' | 'forgot';
 
 export default function AuthModal({ onClose }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [loginStep, setLoginStep] = useState<LoginStep>('form');
   const [registerStep, setRegisterStep] = useState<RegisterStep>('form');
   const [form, setForm] = useState({ username: '', email: '', password: '' });
+  const [loginCode, setLoginCode] = useState('');
+  const [loginCodeCooldown, setLoginCodeCooldown] = useState(0);
+  const [registerOtpCooldown, setRegisterOtpCooldown] = useState(0);
   const [otpCode, setOtpCode] = useState('');
   const [loading, setLoading] = useState(false);
   const { setAuth } = useAuthStore();
+
+  useEffect(() => {
+    if (loginCodeCooldown <= 0 && registerOtpCooldown <= 0) return;
+    const id = window.setInterval(() => {
+      setLoginCodeCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      setRegisterOtpCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [loginCodeCooldown, registerOtpCooldown]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,6 +59,40 @@ export default function AuthModal({ onClose }: Props) {
     }
   };
 
+  const handleSendLoginCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await api.post<SendCodeResponse>('/auth/send-login-code', { email: form.email });
+      toast.success(`Login code sent to ${form.email}`);
+      setLoginCodeCooldown(res.data?.cooldown_seconds ?? 60);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to send login code';
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLoginWithCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await api.post('/auth/login-with-code', { email: form.email, code: loginCode });
+      const { token, user } = res.data;
+      setAuth(user, token);
+      window.dispatchEvent(new CustomEvent('photcot:auth-changed'));
+      toast.success(`Welcome back, @${user.username}!`);
+      onClose();
+      window.location.reload();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Code verification failed';
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Step 1: validate form and send OTP
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,11 +102,27 @@ export default function AuthModal({ onClose }: Props) {
     }
     setLoading(true);
     try {
-      await api.post('/auth/send-otp', { email: form.email });
+      const res = await api.post<SendCodeResponse>('/auth/send-otp', { email: form.email });
       toast.success(`Verification code sent to ${form.email}`);
       setRegisterStep('otp');
+      setRegisterOtpCooldown(res.data?.cooldown_seconds ?? 60);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to send verification code';
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendRegisterOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await api.post<SendCodeResponse>('/auth/send-otp', { email: form.email });
+      toast.success(`Verification code resent to ${form.email}`);
+      setRegisterOtpCooldown(res.data?.cooldown_seconds ?? 60);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to resend verification code';
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -92,8 +158,12 @@ export default function AuthModal({ onClose }: Props) {
 
   const switchMode = (m: 'login' | 'register') => {
     setMode(m);
+    setLoginStep('form');
     setRegisterStep('form');
     setForm({ username: '', email: '', password: '' });
+    setLoginCode('');
+    setLoginCodeCooldown(0);
+    setRegisterOtpCooldown(0);
     setOtpCode('');
   };
 
@@ -103,11 +173,17 @@ export default function AuthModal({ onClose }: Props) {
         <div className="text-center mb-6">
           <h1 className="text-3xl font-black text-[#FE2C55] mb-1">Phatforces</h1>
           <p className="text-gray-400 text-sm">
-            {mode === 'login' ? 'Log in to continue' : registerStep === 'form' ? 'Create your account' : 'Verify your email'}
+            {mode === 'login'
+              ? loginStep === 'form'
+                ? 'Log in to continue'
+                : 'Recover account with email code'
+              : registerStep === 'form'
+                ? 'Create your account'
+                : 'Verify your email'}
           </p>
         </div>
 
-        {mode === 'login' && (
+        {mode === 'login' && loginStep === 'form' && (
           <form onSubmit={handleLogin} className="flex flex-col gap-3">
             <input type="email" placeholder="Email" value={form.email}
               onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
@@ -120,6 +196,72 @@ export default function AuthModal({ onClose }: Props) {
             <button type="submit" disabled={loading}
               className="bg-[#FE2C55] text-white font-bold py-3 rounded-xl hover:bg-[#e0193f] transition-colors disabled:opacity-50 mt-1 text-sm">
               {loading ? 'Logging in...' : 'Log In'}
+            </button>
+            <button
+              type="button"
+              className="text-gray-400 text-sm hover:text-white transition-colors"
+              onClick={() => {
+                setLoginStep('forgot');
+                setLoginCode('');
+              }}
+            >
+              Forgot password?
+            </button>
+          </form>
+        )}
+
+        {mode === 'login' && loginStep === 'forgot' && (
+          <form onSubmit={handleLoginWithCode} className="flex flex-col gap-3">
+            <p className="text-gray-400 text-sm text-center">
+              Enter your registered email, then request a login code.
+            </p>
+            <input
+              type="email"
+              placeholder="Registered email"
+              value={form.email}
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              className="bg-[#161823] border border-[#2D2F3E] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#FE2C55] transition-colors"
+              required
+            />
+            <button
+              type="button"
+              disabled={loading || !form.email || loginCodeCooldown > 0}
+              onClick={handleSendLoginCode}
+              className="bg-[#2D2F3E] text-white font-bold py-3 rounded-xl hover:bg-[#3a3d4d] transition-colors disabled:opacity-50 text-sm"
+            >
+              {loading
+                ? 'Sending code...'
+                : loginCodeCooldown > 0
+                  ? `Resend in ${loginCodeCooldown}s`
+                  : 'Send Login Code'}
+            </button>
+            <input
+              type="text"
+              placeholder="Enter 6-digit code"
+              value={loginCode}
+              onChange={e => setLoginCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              className="bg-[#161823] border border-[#2D2F3E] rounded-xl px-4 py-3 text-white text-sm text-center tracking-[0.5em] text-lg focus:outline-none focus:border-[#FE2C55] transition-colors"
+              required
+              maxLength={6}
+              minLength={6}
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={loading || loginCode.length !== 6}
+              className="bg-[#FE2C55] text-white font-bold py-3 rounded-xl hover:bg-[#e0193f] transition-colors disabled:opacity-50 mt-1 text-sm"
+            >
+              {loading ? 'Verifying...' : 'Log In With Code'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLoginStep('form');
+                setLoginCode('');
+              }}
+              className="text-gray-400 text-sm hover:text-white transition-colors"
+            >
+              Back to password login
             </button>
           </form>
         )}
@@ -158,6 +300,18 @@ export default function AuthModal({ onClose }: Props) {
             <button type="submit" disabled={loading || otpCode.length !== 6}
               className="bg-[#FE2C55] text-white font-bold py-3 rounded-xl hover:bg-[#e0193f] transition-colors disabled:opacity-50 mt-1 text-sm">
               {loading ? 'Verifying...' : 'Verify & Create Account'}
+            </button>
+            <button
+              type="button"
+              disabled={loading || registerOtpCooldown > 0}
+              onClick={handleResendRegisterOTP}
+              className="bg-[#2D2F3E] text-white font-bold py-3 rounded-xl hover:bg-[#3a3d4d] transition-colors disabled:opacity-50 text-sm"
+            >
+              {loading
+                ? 'Sending code...'
+                : registerOtpCooldown > 0
+                  ? `Resend in ${registerOtpCooldown}s`
+                  : 'Resend Verification Code'}
             </button>
             <button type="button" onClick={() => { setRegisterStep('form'); setOtpCode(''); }}
               className="text-gray-400 text-sm hover:text-white transition-colors">

@@ -42,6 +42,8 @@ func main() {
 			authHandler := handlers.NewAuthHandler(database, cfg)
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
+			auth.POST("/send-login-code", authHandler.SendLoginCode)
+			auth.POST("/login-with-code", authHandler.LoginWithCode)
 			auth.POST("/refresh", authHandler.RefreshToken)
 
 			// OTP email verification

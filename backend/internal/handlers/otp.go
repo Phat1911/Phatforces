@@ -49,7 +49,7 @@ func (h *OTPHandler) SendOTP(c *gin.Context) {
 		"SELECT COUNT(*) FROM email_otps WHERE email=$1 AND created_at > NOW() - INTERVAL '1 hour'",
 		req.Email,
 	).Scan(&recentCount)
-	if recentCount >= 3 {
+	if recentCount >= h.cfg.OTPMaxRequestsPerHour {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many OTP requests, please wait before trying again"})
 		return
 	}
@@ -60,7 +60,7 @@ func (h *OTPHandler) SendOTP(c *gin.Context) {
 	// Generate 6-digit code
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	code := fmt.Sprintf("%06d", rng.Intn(1000000))
-	expiresAt := time.Now().Add(10 * time.Minute)
+	expiresAt := time.Now().Add(time.Duration(h.cfg.OTPExpiryMinutes) * time.Minute)
 
 	_, err := h.db.Exec(
 		"INSERT INTO email_otps (email, code, expires_at) VALUES ($1, $2, $3)",
@@ -82,12 +82,16 @@ func (h *OTPHandler) SendOTP(c *gin.Context) {
 	// If no Resend key configured, return code directly for dev convenience
 	if h.cfg.ResendKey == "" {
 		c.JSON(http.StatusOK, gin.H{
-			"message":  "verification code sent to " + req.Email,
-			"dev_code": code,
+			"message":          "verification code sent to " + req.Email,
+			"dev_code":         code,
+			"cooldown_seconds": h.cfg.OTPResendCooldownSeconds,
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "verification code sent to " + req.Email})
+	c.JSON(http.StatusOK, gin.H{
+		"message":          "verification code sent to " + req.Email,
+		"cooldown_seconds": h.cfg.OTPResendCooldownSeconds,
+	})
 }
 
 // VerifyOTP - POST /auth/verify-otp

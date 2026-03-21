@@ -135,3 +135,90 @@ cd /home/ubuntu/phatforces/deploy
 sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=<previous_sha>/' .env.prod
 ./deploy.sh
 ```
+
+---
+
+## 10. Pushing Code Updates to phatforces.me
+
+This is the day-to-day workflow every time you change code locally.
+
+### Normal update (via GitHub Actions — recommended)
+
+```bash
+# 1. Stage all changed files
+git add -A
+
+# 2. Commit with a meaningful message
+git commit -m "feat: describe what you changed"
+
+# 3. Push to main — this triggers CI/CD automatically
+git push origin main
+```
+
+GitHub Actions will:
+1. Build the Go backend binary and Docker image
+2. Build the Next.js frontend Docker image
+3. Push both images to AWS ECR with the commit SHA as the tag
+4. SSH into the EC2 server and run `deploy/deploy.sh`
+5. Docker Compose pulls the new images and restarts only changed containers
+
+You can watch progress at: `https://github.com/Phat1911/Phatforces/actions`
+
+---
+
+### Manual update (SSH directly — fallback when CI is unavailable)
+
+```bash
+# SSH into your server
+ssh -i phatforces-ec2.pem ubuntu@<EC2_PUBLIC_IP>
+
+# Go to the project
+cd /home/ubuntu/phatforces
+
+# Pull the latest code
+git pull origin main
+
+# Re-pull images and restart containers
+cd deploy
+./deploy.sh
+```
+
+---
+
+### Updating environment variables (e.g. OTP policy, secrets)
+
+Edit `.env.prod` on the server, then restart the backend:
+
+```bash
+ssh -i phatforces-ec2.pem ubuntu@<EC2_PUBLIC_IP>
+cd /home/ubuntu/phatforces/deploy
+nano .env.prod   # Make your changes
+
+# Restart only the backend container to pick up new env vars
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-deps backend
+```
+
+Key env vars you may want to tune:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OTP_EXPIRY_MINUTES` | `10` | How long a code is valid |
+| `OTP_MAX_REQUESTS_PER_HOUR` | `3` | Rate limit per email per hour |
+| `OTP_RESEND_COOLDOWN_SECONDS` | `60` | Cooldown shown in UI before resend |
+| `RESEND_API_KEY` | — | Resend email API key |
+| `JWT_SECRET` | — | JWT signing secret |
+
+---
+
+### Verifying a deploy
+
+```bash
+# Check all containers are running
+docker compose -f /home/ubuntu/phatforces/deploy/docker-compose.prod.yml ps
+
+# Health check
+curl -s https://phatforces.me/api/health
+
+# Tail backend logs
+docker compose -f /home/ubuntu/phatforces/deploy/docker-compose.prod.yml logs -f backend
+```
