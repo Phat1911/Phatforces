@@ -2,8 +2,8 @@ import axios from 'axios';
 
 const isProd = process.env.NODE_ENV === 'production';
 const cleanUrl = (value: string | undefined, fallback: string) => (value || fallback).trim().replace(/[\r\n]+/g, '');
-const API_URL = cleanUrl(process.env.NEXT_PUBLIC_API_URL, isProd ? 'https://api.phatforces.me/api/v1' : 'http://localhost:8080/api/v1');
-const UPLOADS_URL = cleanUrl(process.env.NEXT_PUBLIC_UPLOADS_URL, isProd ? 'https://api.phatforces.me' : 'http://localhost:8080');
+const API_URL = cleanUrl(process.env.NEXT_PUBLIC_API_URL, isProd ? '/api/v1' : 'http://localhost:8080/api/v1');
+const UPLOADS_URL = cleanUrl(process.env.NEXT_PUBLIC_UPLOADS_URL, isProd ? '' : 'http://localhost:8080');
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -26,11 +26,11 @@ api.interceptors.response.use(
 export const getVideoUrl = (url: string) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  return UPLOADS_URL + url;
+  return UPLOADS_URL ? UPLOADS_URL + url : url;
 };
 
 export const getThumbUrl = (url: string) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  return UPLOADS_URL + url;
+  return UPLOADS_URL ? UPLOADS_URL + url : url;
 };

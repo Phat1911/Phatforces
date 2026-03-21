@@ -28,11 +28,15 @@ export default function AuthModal({ onClose }: Props) {
       onClose();
       window.location.reload();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const e = err as { response?: { status?: number; data?: { error?: string } }; message?: string; code?: string };
+      const msg = e?.response?.data?.error;
       if (msg) {
         toast.error(msg);
       } else {
-        toast.error('Unable to reach server. Please check deployment/CORS and try again.');
+        const detail = e?.response?.status
+          ? `Request failed (${e.response.status})`
+          : `Network error: ${e?.code || e?.message || 'unknown'}`;
+        toast.error(`${detail}. API: ${api.defaults.baseURL}`);
       }
     } finally {
       setLoading(false);
