@@ -42,18 +42,31 @@ jobs:
           script: |
             set -e
             ACR="photcotregistry.azurecr.io"
+            ENV_FILE="/home/azureuser/photcot/backend/.env"
             echo "${{ secrets.ACR_PASSWORD }}" | docker login $ACR -u "${{ secrets.ACR_USERNAME }}" --password-stdin
 
+            # --- Backend ---
             docker pull $ACR/photcot-backend:latest
-            docker stop photcot-backend && docker rm photcot-backend
-            docker run -d --name photcot-backend --restart unless-stopped --network host \
-              --env-file /home/azureuser/photcot/backend/.env \
-              -e PORT=8080 \
-              -v /home/azureuser/photcot/backend/uploads:/app/uploads \
-              $ACR/photcot-backend:latest
+            docker stop photcot-backend 2>/dev/null || true
+            docker rm   photcot-backend 2>/dev/null || true
+            if [[ -f "$ENV_FILE" ]]; then
+              docker run -d --name photcot-backend --restart unless-stopped --network host \
+                --env-file "$ENV_FILE" \
+                -e PORT=8080 \
+                -v /home/azureuser/photcot/backend/uploads:/app/uploads \
+                $ACR/photcot-backend:latest
+            else
+              echo "WARNING: $ENV_FILE not found — backend started without env file. Create it and redeploy."
+              docker run -d --name photcot-backend --restart unless-stopped --network host \
+                -e PORT=8080 \
+                -v /home/azureuser/photcot/backend/uploads:/app/uploads \
+                $ACR/photcot-backend:latest
+            fi
 
+            # --- Frontend (always runs, independent of backend) ---
             docker pull $ACR/photcot-frontend:latest
-            docker stop photcot-frontend && docker rm photcot-frontend
+            docker stop photcot-frontend 2>/dev/null || true
+            docker rm   photcot-frontend 2>/dev/null || true
             docker run -d --name photcot-frontend --restart unless-stopped --network host \
               -e NEXT_PUBLIC_API_URL=https://api.phatforces.me/api/v1 \
               -e NEXT_PUBLIC_UPLOADS_URL=https://api.phatforces.me \
