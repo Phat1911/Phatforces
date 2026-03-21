@@ -5,7 +5,6 @@ import { api, getThumbUrl } from '@/lib/api';
 import { AiOutlineBell, AiOutlineHeart, AiOutlineMessage, AiOutlineDelete } from 'react-icons/ai';
 import { FiUserPlus, FiBookmark } from 'react-icons/fi';
 import { BiCommentDetail } from 'react-icons/bi';
-import Cookies from 'js-cookie';
 
 interface Notification {
   id: string;
@@ -23,6 +22,7 @@ interface Notification {
 function typeIcon(type: string) {
   switch (type) {
     case 'like':    return <AiOutlineHeart className="text-[#FE2C55]" size={18} />;
+    case 'reaction': return <AiOutlineHeart className="text-pink-400" size={18} />;
     case 'comment': return <AiOutlineMessage className="text-blue-400" size={18} />;
     case 'reply':   return <BiCommentDetail className="text-cyan-400" size={18} />;
     case 'message': return <AiOutlineMessage className="text-violet-400" size={18} />;
@@ -49,25 +49,59 @@ export default function NotificationsPage() {
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
   const router = useRouter();
 
-  useEffect(() => { setMounted(true); }, []);
-
-  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
+  useEffect(() => { 
+    setMounted(true);
+    // Check if logged in by trying to fetch notifications
+    api.get('/notifications').then(() => {
+      setLoggedIn(true);
+    }).catch(() => {
+      setLoggedIn(false);
+    });
+  }, []);
 
   const fetchNotifications = useCallback(async () => {
-    if (!isLoggedIn()) { setLoading(false); return; }
+    if (!loggedIn) { setLoading(false); return; }
     try {
       const res = await api.get('/notifications');
       setNotifications(res.data.notifications || []);
       setUnread(res.data.unread_count || 0);
     } catch { }
     finally { setLoading(false); }
-  }, [mounted]);
+  }, [loggedIn]);
 
   useEffect(() => {
-    if (mounted) fetchNotifications();
-  }, [mounted, fetchNotifications]);
+    if (loggedIn) fetchNotifications();
+  }, [loggedIn, fetchNotifications]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    const base = (api.defaults.baseURL || '').replace(/\/$/, '');
+    if (!base.startsWith('http')) return;
+
+    // EventSource will automatically include HttpOnly cookie
+    const streamUrl = `${base}/notifications/stream`;
+    const es = new EventSource(streamUrl, { withCredentials: true });
+
+    es.addEventListener('notification', () => {
+      fetchNotifications();
+    });
+
+    es.onerror = () => {
+      // keep page usable; periodic reload below will still sync
+    };
+
+    const fallback = setInterval(() => {
+      fetchNotifications();
+    }, 10000);
+
+    return () => {
+      clearInterval(fallback);
+      es.close();
+    };
+  }, [loggedIn, fetchNotifications]);
 
   const markAllRead = async () => {
     try {
@@ -107,7 +141,7 @@ export default function NotificationsPage() {
 
   if (!mounted) return null;
 
-  if (!isLoggedIn()) {
+  if (!loggedIn) {
     return (
       <div className="min-h-screen bg-[#161823] flex flex-col items-center justify-center gap-4 p-8">
         <AiOutlineBell size={48} className="text-gray-600" />

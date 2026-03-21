@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
-import Cookies from 'js-cookie';
 
 interface Props { onClose: () => void; }
 
@@ -23,15 +22,18 @@ export default function AuthModal({ onClose }: Props) {
     try {
       const res = await api.post('/auth/login', { email: form.email, password: form.password });
       const { token, user } = res.data;
-      Cookies.set('photcot_token', token, { expires: 1 });
       setAuth(user, token);
       window.dispatchEvent(new CustomEvent('photcot:auth-changed'));
       toast.success(`Welcome back, @${user.username}!`);
       onClose();
       window.location.reload();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Invalid credentials';
-      toast.error(msg);
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      if (msg) {
+        toast.error(msg);
+      } else {
+        toast.error('Unable to reach server. Please check deployment/CORS and try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -40,8 +42,8 @@ export default function AuthModal({ onClose }: Props) {
   // Step 1: validate form and send OTP
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.password.length < 6) {
-      toast.error('Password must be at least 6 characters');
+    if (form.password.length < 8) {
+      toast.error('Password must be at least 8 characters');
       return;
     }
     setLoading(true);
@@ -71,7 +73,6 @@ export default function AuthModal({ onClose }: Props) {
         password: form.password,
       });
       const { token, user } = res.data;
-      Cookies.set('photcot_token', token, { expires: 1 });
       setAuth(user, token);
       window.dispatchEvent(new CustomEvent('photcot:auth-changed'));
       toast.success(`Welcome to Phatforces, @${user.username}!`);
@@ -111,7 +112,7 @@ export default function AuthModal({ onClose }: Props) {
             <input type="password" placeholder="Password" value={form.password}
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
               className="bg-[#161823] border border-[#2D2F3E] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#FE2C55] transition-colors"
-              required minLength={6} />
+              required minLength={8} />
             <button type="submit" disabled={loading}
               className="bg-[#FE2C55] text-white font-bold py-3 rounded-xl hover:bg-[#e0193f] transition-colors disabled:opacity-50 mt-1 text-sm">
               {loading ? 'Logging in...' : 'Log In'}
@@ -129,10 +130,10 @@ export default function AuthModal({ onClose }: Props) {
               onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
               className="bg-[#161823] border border-[#2D2F3E] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#FE2C55] transition-colors"
               required />
-            <input type="password" placeholder="Password (min 6 chars)" value={form.password}
+            <input type="password" placeholder="Password (min 8 chars)" value={form.password}
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
               className="bg-[#161823] border border-[#2D2F3E] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#FE2C55] transition-colors"
-              required minLength={6} />
+              required minLength={8} />
             <button type="submit" disabled={loading}
               className="bg-[#FE2C55] text-white font-bold py-3 rounded-xl hover:bg-[#e0193f] transition-colors disabled:opacity-50 mt-1 text-sm">
               {loading ? 'Sending code...' : 'Send Verification Code'}

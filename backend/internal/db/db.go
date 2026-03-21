@@ -105,6 +105,15 @@ func Migrate(db *sql.DB) {
 		`ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES comments(id) ON DELETE CASCADE`,
 		`ALTER TABLE comments ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_id)`,
+		`CREATE TABLE IF NOT EXISTS comment_reactions (
+			user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			comment_id UUID NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+			reaction_type VARCHAR(16) NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (user_id, comment_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_comment_reactions_comment_id ON comment_reactions(comment_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_comment_reactions_user_id ON comment_reactions(user_id)`,
 		`CREATE TABLE IF NOT EXISTS hashtags (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			name VARCHAR(100) UNIQUE NOT NULL,

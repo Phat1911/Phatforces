@@ -42,15 +42,35 @@ export interface Video {
 interface AuthStore {
   user: User | null;
   token: string | null;
-  setAuth: (user: User, token: string) => void;
+  setAuth: (user: User, token?: string) => void;
   clearAuth: () => void;
 }
 
+const loadUserFromStorage = (): User | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('photcot_user');
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+};
+
 export const useAuthStore = create<AuthStore>((set) => ({
-  user: null,
+  user: loadUserFromStorage(),
   token: null,
-  setAuth: (user, token) => set({ user, token }),
-  clearAuth: () => set({ user: null, token: null }),
+  setAuth: (user, token) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('photcot_user', JSON.stringify(user));
+    }
+    set({ user, token: token ?? null });
+  },
+  clearAuth: () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('photcot_user');
+    }
+    set({ user: null, token: null });
+  },
 }));
 
 interface FeedStore {

@@ -5,7 +5,6 @@ import { useState, useEffect } from 'react';
 import { AiFillHome, AiOutlineHome, AiOutlineSearch, AiOutlinePlusSquare, AiOutlineBell, AiFillBell } from 'react-icons/ai';
 import { BsPerson, BsPersonFill } from 'react-icons/bs';
 import { api } from '@/lib/api';
-import Cookies from 'js-cookie';
 
 interface Props { onAuthRequired: () => void; }
 
@@ -17,7 +16,7 @@ export default function BottomNav({ onAuthRequired }: Props) {
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    if (!mounted || !Cookies.get('photcot_token')) return;
+    if (!mounted) return;
     const fetchUnread = async () => {
       try {
         const res = await api.get('/notifications/unread');
@@ -25,12 +24,41 @@ export default function BottomNav({ onAuthRequired }: Props) {
       } catch { }
     };
     fetchUnread();
+    const base = (api.defaults.baseURL || '').replace(/\/$/, '');
+    let es: EventSource | null = null;
+    // EventSource will automatically include HttpOnly cookie
+    if (base.startsWith('http')) {
+      const streamUrl = `${base}/notifications/stream`;
+      es = new EventSource(streamUrl, { withCredentials: true });
+      es.addEventListener('notification', fetchUnread);
+    }
     const interval = setInterval(fetchUnread, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      es?.close();
+    };
   }, [mounted]);
 
+  const [loggedIn, setLoggedIn] = useState(false);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        await api.get('/notifications/unread');
+        setLoggedIn(true);
+      } catch (e) {
+        if ((e as any)?.response?.status === 401) {
+          setLoggedIn(false);
+        }
+      }
+    };
+    checkAuth();
+    window.addEventListener('photcot:auth-expired', () => setLoggedIn(false));
+    return () => window.removeEventListener('photcot:auth-expired', () => {});
+  }, []);
+
   const handleProtected = (e: React.MouseEvent) => {
-    if (!Cookies.get('photcot_token')) { e.preventDefault(); onAuthRequired(); }
+    if (!loggedIn) { e.preventDefault(); onAuthRequired(); }
   };
 
   return (

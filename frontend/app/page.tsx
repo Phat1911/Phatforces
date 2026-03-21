@@ -303,6 +303,11 @@ function HomePage() {
                   video={video}
                   isActive={idx === currentIndex}
                   targetCommentId={idx === currentIndex ? (deepLinkCommentRef.current || undefined) : undefined}
+                  onTargetCommentHandled={() => {
+                    if (idx === currentIndex) {
+                      deepLinkCommentRef.current = null;
+                    }
+                  }}
                   onAuthRequired={() => setShowAuth(true)}
                 />
               );

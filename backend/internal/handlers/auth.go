@@ -103,6 +103,19 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	token := h.generateToken(user.ID, user.Username, false)
+	
+	// SameSite=None required for cross-origin requests (frontend on phatforces.me, API on api.phatforces.me)
+	c.SetSameSite(http.SameSiteNoneMode)
+	c.SetCookie(
+		"photcot_token",           // cookie name
+		token,                     // cookie value
+		24*60*60,                  // max age: 24 hours
+		"/",                       // path
+		"",                        // domain (empty = current domain)
+		true,                      // secure (HTTPS only) - required for SameSite=None
+		true,                      // httpOnly
+	)
+	
 	c.JSON(http.StatusCreated, models.AuthResponse{Token: token, User: &user})
 }
 
@@ -137,6 +150,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	token := h.generateToken(user.ID, user.Username, isAdmin)
+	
+	// SameSite=None required for cross-origin requests (frontend on phatforces.me, API on api.phatforces.me)
+	c.SetSameSite(http.SameSiteNoneMode)
+	c.SetCookie(
+		"photcot_token",           // cookie name
+		token,                     // cookie value
+		24*60*60,                  // max age: 24 hours
+		"/",                       // path
+		"",                        // domain (empty = current domain)
+		true,                      // secure (HTTPS only) - required for SameSite=None
+		true,                      // httpOnly
+	)
+	
 	c.JSON(http.StatusOK, models.AuthResponse{Token: token, User: &user})
 }
 
@@ -153,4 +179,11 @@ func (h *AuthHandler) generateToken(userID, username string, isAdmin bool) strin
 	}
 	token, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(h.cfg.JWTSecret))
 	return token
+}
+
+func (h *AuthHandler) Logout(c *gin.Context) {
+	// Clear the HttpOnly cookie by setting Max-Age to -1
+	c.SetSameSite(http.SameSiteNoneMode)
+	c.SetCookie("photcot_token", "", -1, "/", "", true, true)
+	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }

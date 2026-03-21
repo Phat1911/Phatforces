@@ -4,7 +4,6 @@ import { useParams, useRouter } from 'next/navigation';
 import { api, getThumbUrl, getVideoUrl } from '@/lib/api';
 import { User, Video } from '@/lib/store';
 import Link from 'next/link';
-import Cookies from 'js-cookie';
 import toast from 'react-hot-toast';
 
 export default function UserProfilePage() {
@@ -22,10 +21,16 @@ export default function UserProfilePage() {
   const [messageLoading, setMessageLoading] = useState(false);
   const [messagesEnabled, setMessagesEnabled] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    api.get('/notifications/unread')
+      .then(() => setLoggedIn(true))
+      .catch(() => setLoggedIn(false));
+  }, []);
 
-  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
+  const isLoggedIn = () => mounted && loggedIn;
 
   useEffect(() => {
     if (!username) return;

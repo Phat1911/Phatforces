@@ -8,17 +8,33 @@ import { BsMusicNote, BsVolumeMute, BsVolumeUp } from 'react-icons/bs';
 import { IoBookmarkOutline, IoBookmark, IoClose, IoCopyOutline, IoLogoWhatsapp, IoLogoFacebook, IoTrash } from 'react-icons/io5';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import Cookies from 'js-cookie';
 import { decodeJwtPayload } from '@/lib/jwt';
 
-interface Props { video: Video; isActive: boolean; onAuthRequired: () => void; targetCommentId?: string; }
+interface Props {
+  video: Video;
+  isActive: boolean;
+  onAuthRequired: () => void;
+  targetCommentId?: string;
+  onTargetCommentHandled?: () => void;
+}
 interface Comment {
   id: string;
   content: string;
   image_url?: string;
   parent_id?: string;
+  reaction_counts?: Record<string, number>;
+  my_reaction?: string;
   replies?: Comment[];
   author: { username: string; avatar_url: string };
+  created_at: string;
+}
+
+interface Reactor {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string;
+  type: string;
   created_at: string;
 }
 
@@ -26,7 +42,18 @@ function countAllComments(list: Comment[]): number {
   return list.reduce((sum, cm) => sum + 1 + ((cm.replies || []).length), 0);
 }
 
-export default function VideoCard({ video, isActive, onAuthRequired, targetCommentId }: Props) {
+const COMMENTS_PAGE_SIZE = 20;
+const REACTION_OPTIONS: Array<{ type: string; emoji: string; label: string }> = [
+  { type: 'like', emoji: '👍', label: 'Like' },
+  { type: 'love', emoji: '❤️', label: 'Love' },
+  { type: 'care', emoji: '🤗', label: 'Care' },
+  { type: 'haha', emoji: '😆', label: 'Haha' },
+  { type: 'wow', emoji: '😮', label: 'Wow' },
+  { type: 'sad', emoji: '😢', label: 'Sad' },
+  { type: 'angry', emoji: '😡', label: 'Angry' },
+];
+
+export default function VideoCard({ video, isActive, onAuthRequired, targetCommentId, onTargetCommentHandled }: Props) {
   // Memoized callback ref - fires synchronously on DOM insert (before IO can fire).
   // Guarantees element is in videoController map before activate() is ever called.
   // Use instanceId as controller key - unique per feed slot, prevents map collision on cycling
@@ -47,6 +74,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
   const [muted, setMuted] = useState(videoController.isMuted());
   const [showComments, setShowComments] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState('');
   const [commentImage, setCommentImage] = useState<File | null>(null);
@@ -55,6 +83,17 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({});
   const [visibleReplies, setVisibleReplies] = useState<Record<string, number>>({});
   const [commentsLoading, setCommentsLoading] = useState(false);
+  const [loadingMoreComments, setLoadingMoreComments] = useState(false);
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
+  const [reactionModalCommentId, setReactionModalCommentId] = useState<string | null>(null);
+  const [reactionModalOpen, setReactionModalOpen] = useState(false);
+  const [reactionModalLoading, setReactionModalLoading] = useState(false);
+  const [reactionModalReactors, setReactionModalReactors] = useState<Reactor[]>([]);
+  const [reactionModalSummary, setReactionModalSummary] = useState<Record<string, number>>({});
+  const [reactionModalFilter, setReactionModalFilter] = useState<string>('all');
+  const [reactionSSEConnected, setReactionSSEConnected] = useState(false);
+  const [commentsPage, setCommentsPage] = useState(1);
+  const [hasMoreComments, setHasMoreComments] = useState(false);
   const [commentCount, setCommentCount] = useState(video.comment_count || 0);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -71,6 +110,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
   const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commentInputRef = useRef<HTMLInputElement>(null);
   const commentNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const handledDeepLinkCommentRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -79,6 +119,29 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       }
     };
   }, [commentImagePreview]);
+
+  // Check if user is logged in by making a simple API call
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        await api.get('/notifications/unread');
+        setLoggedIn(true);
+      } catch (e) {
+        if ((e as any)?.response?.status === 401) {
+          setLoggedIn(false);
+        }
+      }
+    };
+    checkAuth();
+    // Listen to auth change events
+    const onAuthChange = () => checkAuth();
+    window.addEventListener('photcot:auth-changed', onAuthChange);
+    window.addEventListener('photcot:auth-expired', () => setLoggedIn(false));
+    return () => {
+      window.removeEventListener('photcot:auth-changed', onAuthChange);
+      window.removeEventListener('photcot:auth-expired', () => {});
+    };
+  }, []);
 
   useEffect(() => {
     if (!replyTo) return;
@@ -98,6 +161,9 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
 
   useEffect(() => {
     if (!targetCommentId || !isActive) return;
+    if (handledDeepLinkCommentRef.current === targetCommentId) return;
+    handledDeepLinkCommentRef.current = targetCommentId;
+    onTargetCommentHandled?.();
     const ensureOpened = async () => {
       if (!showComments) {
         await openComments();
@@ -131,7 +197,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     };
     ensureOpened();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetCommentId, isActive, showComments, comments.length]);
+  }, [targetCommentId, isActive, showComments, comments.length, onTargetCommentHandled]);
 
   // isActive drives UI only: mute icon sync, paused reset, view tracking.
   // Actual play/pause/mute is owned by videoController.activate() called
@@ -143,7 +209,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       setPaused(false);
       // Record view after 3s using real watch_percent from the video element
       viewTimerRef.current = setTimeout(() => {
-        if (!viewRecordedRef.current && Cookies.get('photcot_token')) {
+        if (!viewRecordedRef.current && loggedIn) {
           const v = videoRef.current;
           const dur = v?.duration || 0;
           const cur = v?.currentTime || 0;
@@ -156,7 +222,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     } else {
       // On scroll-away: send final view with real watch_percent if not yet recorded
       const v = videoRef.current;
-      if (!viewRecordedRef.current && Cookies.get('photcot_token') && v && v.duration > 0 && v.currentTime > 1) {
+      if (!viewRecordedRef.current && loggedIn && v && v.duration > 0 && v.currentTime > 1) {
         const watchPercent = Math.round((v.currentTime / v.duration) * 100);
         const watchTime = Math.round(v.currentTime);
         api.post(`/videos/${video.id}/view`, { watch_time: watchTime, watch_percent: watchPercent }).catch(() => {});
@@ -281,7 +347,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
   };
 
   const handleLike = useCallback(async () => {
-    if (!Cookies.get('photcot_token')) { onAuthRequired(); return; }
+    if (!loggedIn) { onAuthRequired(); return; }
     setLikeAnim(true);
     setTimeout(() => setLikeAnim(false), 400);
     try {
@@ -297,7 +363,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
 
   const handleSave = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!Cookies.get('photcot_token')) { onAuthRequired(); return; }
+    if (!loggedIn) { onAuthRequired(); return; }
     setSaveAnim(true);
     setTimeout(() => setSaveAnim(false), 400);
     try {
@@ -315,17 +381,45 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     } catch { toast.error('Failed to save'); }
   };
 
-  const openComments = async () => {
+  const openComments = async (force = false) => {
     setShowComments(true);
-    if (comments.length > 0) return;
+    if (!force && comments.length > 0) return;
+    if (force) {
+      setCommentsPage(1);
+      setHasMoreComments(false);
+    }
     setCommentsLoading(true);
     try {
-      const res = await api.get(`/videos/${video.id}/comments`);
+      const res = await api.get(`/videos/${video.id}/comments`, {
+        params: { page: 1, limit: COMMENTS_PAGE_SIZE },
+      });
       const loaded = res.data.comments || [];
       setComments(loaded);
       setCommentCount(countAllComments(loaded));
+      setCommentsPage(1);
+      setHasMoreComments(Boolean(res.data.has_more));
     } catch { toast.error('Could not load comments'); }
     finally { setCommentsLoading(false); }
+  };
+
+  const loadMoreComments = async () => {
+    if (commentsLoading || loadingMoreComments || !hasMoreComments) return;
+    const nextPage = commentsPage + 1;
+    setLoadingMoreComments(true);
+    try {
+      const res = await api.get(`/videos/${video.id}/comments`, {
+        params: { page: nextPage, limit: COMMENTS_PAGE_SIZE },
+      });
+      const loaded = res.data.comments || [];
+      setComments(prev => [...prev, ...loaded]);
+      setCommentCount(prev => prev + countAllComments(loaded));
+      setCommentsPage(nextPage);
+      setHasMoreComments(Boolean(res.data.has_more));
+    } catch {
+      toast.error('Could not load more comments');
+    } finally {
+      setLoadingMoreComments(false);
+    }
   };
 
   const onCommentImageChange = (file: File | null) => {
@@ -341,7 +435,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
 
   const submitComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!Cookies.get('photcot_token')) { onAuthRequired(); return; }
+    if (!loggedIn) { onAuthRequired(); return; }
     if (!commentText.trim() && !commentImage) return;
     const trimmed = commentText.trim();
     const hasImage = Boolean(commentImage);
@@ -362,14 +456,27 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
           });
 
       const created = res.data as Comment;
+      let affectedRootId: string | null = null;
+      let affectedReplyCount = 0;
       setComments(prev => {
         if (created.parent_id) {
-          return prev.map((cm) => cm.id === created.parent_id
-            ? { ...cm, replies: [created, ...(cm.replies || [])] }
-            : cm);
+          return prev.map((cm) => {
+            const isRootParent = cm.id === created.parent_id;
+            const isNestedUnderRoot = (cm.replies || []).some((rp) => rp.id === created.parent_id);
+            if (isRootParent || isNestedUnderRoot) {
+              affectedRootId = cm.id;
+              affectedReplyCount = (cm.replies || []).length + 1;
+              return { ...cm, replies: [...(cm.replies || []), created] };
+            }
+            return cm;
+          });
         }
-        return [created, ...prev];
+        return [...prev, created];
       });
+      if (affectedRootId) {
+        setExpandedReplies(exp => ({ ...exp, [affectedRootId as string]: true }));
+        setVisibleReplies(vis => ({ ...vis, [affectedRootId as string]: Math.max(vis[affectedRootId as string] || 10, affectedReplyCount) }));
+      }
       setCommentCount(prev => prev + 1);
       setCommentText('');
       onCommentImageChange(null);
@@ -398,33 +505,49 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
 
   const deleteComment = async (commentId: string, isReply: boolean, parentId?: string) => {
     try {
-      await api.delete(`/comments/${commentId}`);
+      const res = await api.delete(`/comments/${commentId}`);
+      const deletedCount = Number(res?.data?.deleted_count) > 0 ? Number(res.data.deleted_count) : 1;
 
       if (isReply && parentId) {
-        // Remove reply from parent
-        setComments(prev => prev.map(cm =>
-          cm.id === parentId
-            ? { ...cm, replies: (cm.replies || []).filter(rp => rp.id !== commentId) }
-            : cm
-        ));
-        setCommentCount(prev => Math.max(0, prev - 1));
+        // Remove the deleted reply subtree in O(r) over replies in this root-thread list.
+        setComments(prev => prev.map(cm => {
+          if (cm.id !== parentId) return cm;
+          const replies = cm.replies || [];
+          const childrenByParent = new Map<string, string[]>();
+          for (const rp of replies) {
+            if (!rp.parent_id) continue;
+            const arr = childrenByParent.get(rp.parent_id) || [];
+            arr.push(rp.id);
+            childrenByParent.set(rp.parent_id, arr);
+          }
+
+          const toRemove = new Set<string>();
+          const stack: string[] = [commentId];
+          while (stack.length > 0) {
+            const curr = stack.pop() as string;
+            if (toRemove.has(curr)) continue;
+            toRemove.add(curr);
+            const children = childrenByParent.get(curr) || [];
+            for (const child of children) {
+              if (!toRemove.has(child)) stack.push(child);
+            }
+            }
+          return { ...cm, replies: replies.filter(rp => !toRemove.has(rp.id)) };
+        }));
+        setCommentCount(prev => Math.max(0, prev - deletedCount));
       } else {
         // Remove top-level comment (and account for local nested replies removed with it)
-        const target = comments.find(cm => cm.id === commentId);
-        const removedCount = 1 + ((target?.replies || []).length);
         setComments(prev => prev.filter(cm => cm.id !== commentId));
-        setCommentCount(prev => Math.max(0, prev - removedCount));
+        setCommentCount(prev => Math.max(0, prev - deletedCount));
       }
       toast.success('Comment deleted');
     } catch { toast.error('Failed to delete comment'); }
   };
 
   const getCurrentUsername = () => {
-    const token = Cookies.get('photcot_token');
-    if (!token) return null;
-    const payload = decodeJwtPayload(token);
-    const username = typeof payload?.username === 'string' ? payload.username : null;
-    return username?.toLowerCase() || null;
+    // Cannot decode HttpOnly cookie on client
+    // Delete functionality will use API to verify ownership
+    return null;
   };
 
   const canDelete = (commentUsername?: string) => {
@@ -439,7 +562,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
 
   // Record share in backend (increments share_count + stores in shared_videos)
   const recordShare = () => {
-    if (Cookies.get('photcot_token')) {
+    if (loggedIn) {
       api.post(`/videos/${video.id}/share`).catch(() => {});
     }
   };
@@ -480,7 +603,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     const now = Date.now();
     if (now - lastTapRef.current < 300) {
       // Double tap - like
-      if (!liked && Cookies.get('photcot_token')) {
+      if (!liked && loggedIn) {
         setDoubleTapHeart(true);
         setTimeout(() => setDoubleTapHeart(false), 900);
         handleLike();
@@ -495,6 +618,175 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
 
   const fmt = (n: number) =>
     n >= 1000000 ? (n/1000000).toFixed(1)+'M' : n >= 1000 ? (n/1000).toFixed(1)+'K' : String(n || 0);
+
+  const totalReactions = (cm: Comment) => Object.values(cm.reaction_counts || {}).reduce((s, v) => s + v, 0);
+
+  const reactionEmoji = (type?: string) => REACTION_OPTIONS.find(r => r.type === type)?.emoji || '';
+
+  const reactionSummaryEntries = (summary?: Record<string, number>) => {
+    if (!summary) return [] as Array<{ type: string; count: number }>;
+    return Object.entries(summary)
+      .filter(([, count]) => count > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([type, count]) => ({ type, count }));
+  };
+
+  const openReactionModal = async (commentId: string) => {
+    setReactionModalCommentId(commentId);
+    setReactionModalOpen(true);
+    setReactionModalLoading(true);
+    try {
+      const res = await api.get(`/comments/${commentId}/reactions`);
+      const reactors = res.data.reactors || [];
+      const summary = res.data.summary || {};
+      setReactionModalReactors(reactors);
+      setReactionModalSummary(summary);
+      const hasLike = summary.like && summary.like > 0;
+      setReactionModalFilter(hasLike ? 'like' : 'all');
+    } catch {
+      toast.error('Failed to load reactions');
+      setReactionModalOpen(false);
+      setReactionModalCommentId(null);
+    } finally {
+      setReactionModalLoading(false);
+    }
+  };
+
+  const closeReactionModal = () => {
+    setReactionModalOpen(false);
+    setReactionModalCommentId(null);
+    setReactionModalReactors([]);
+    setReactionModalSummary({});
+    setReactionModalFilter('all');
+  };
+
+  const updateCommentReactionState = (commentId: string, counts: Record<string, number>, myReaction?: string | null) => {
+    setComments(prev => prev.map(cm => {
+      if (cm.id === commentId) {
+        return {
+          ...cm,
+          reaction_counts: counts,
+          my_reaction: myReaction === undefined || myReaction === null ? cm.my_reaction : (myReaction || ''),
+        };
+      }
+      const replies = (cm.replies || []).map(rp => rp.id === commentId
+        ? {
+          ...rp,
+          reaction_counts: counts,
+          my_reaction: myReaction === undefined || myReaction === null ? rp.my_reaction : (myReaction || ''),
+        }
+        : rp);
+      return { ...cm, replies };
+    }));
+  };
+
+  const reactComment = async (commentId: string, type: string) => {
+    if (!loggedIn) { onAuthRequired(); return; }
+    try {
+      const res = await api.post(`/comments/${commentId}/reaction`, { type });
+      updateCommentReactionState(commentId, res.data.reaction_counts || {}, res.data.my_reaction || '');
+      setReactionPickerFor(null);
+    } catch {
+      toast.error('Failed to react');
+    }
+  };
+
+  const removeReaction = async (commentId: string) => {
+    if (!loggedIn) { onAuthRequired(); return; }
+    try {
+      const res = await api.delete(`/comments/${commentId}/reaction`);
+      updateCommentReactionState(commentId, res.data.reaction_counts || {}, res.data.my_reaction || '');
+      setReactionPickerFor(null);
+    } catch {
+      toast.error('Failed to remove reaction');
+    }
+  };
+
+  useEffect(() => {
+    if (!showComments || !isActive) return;
+
+    const base = (api.defaults.baseURL || '').replace(/\/$/, '');
+    if (!base.startsWith('http')) return;
+
+    // EventSource will automatically include HttpOnly cookie with the request
+    const streamUrl = `${base}/comments/reactions/stream?video_id=${encodeURIComponent(video.id)}`;
+    const es = new EventSource(streamUrl, { withCredentials: true });
+
+    es.addEventListener('connected', () => {
+      setReactionSSEConnected(true);
+    });
+
+    es.addEventListener('reaction', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data || '{}') as {
+          comment_id?: string;
+          reaction_counts?: Record<string, number>;
+        };
+        if (payload.comment_id && payload.reaction_counts) {
+          updateCommentReactionState(payload.comment_id, payload.reaction_counts, null);
+          if (reactionModalOpen && reactionModalCommentId === payload.comment_id) {
+            api.get(`/comments/${payload.comment_id}/reactions`).then((res) => {
+              setReactionModalReactors(res.data.reactors || []);
+              setReactionModalSummary(res.data.summary || {});
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // ignore malformed event payloads
+      }
+    });
+
+    es.onerror = () => {
+      setReactionSSEConnected(false);
+    };
+
+    return () => {
+      setReactionSSEConnected(false);
+      es.close();
+    };
+  }, [showComments, isActive, video.id, reactionModalOpen, reactionModalCommentId]);
+
+  useEffect(() => {
+    if (!showComments || !isActive || reactionSSEConnected) return;
+    const timer = setInterval(() => {
+      openComments(true).catch(() => {});
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [showComments, isActive, reactionSSEConnected]);
+
+  useEffect(() => {
+    if (!reactionModalOpen || !reactionModalCommentId) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await api.get(`/comments/${reactionModalCommentId}/reactions`);
+        setReactionModalReactors(res.data.reactors || []);
+        setReactionModalSummary(res.data.summary || {});
+      } catch {
+        // silent refresh to keep modal data fresh while open
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [reactionModalOpen, reactionModalCommentId]);
+
+  const timeAgo = (dateStr?: string) => {
+    if (!dateStr) return 'now';
+    const t = new Date(dateStr).getTime();
+    if (Number.isNaN(t)) return 'now';
+    const diffSec = Math.max(1, Math.floor((Date.now() - t) / 1000));
+    if (diffSec < 60) return `${diffSec}s`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m`;
+    const diffHour = Math.floor(diffMin / 60);
+    if (diffHour < 24) return `${diffHour}h`;
+    const diffDay = Math.floor(diffHour / 24);
+    if (diffDay < 7) return `${diffDay}d`;
+    const diffWeek = Math.floor(diffDay / 7);
+    if (diffWeek < 5) return `${diffWeek}w`;
+    const diffMonth = Math.floor(diffDay / 30);
+    if (diffMonth < 12) return `${diffMonth}mo`;
+    const diffYear = Math.floor(diffDay / 365);
+    return `${diffYear}y`;
+  };
 
   const videoSrc = getVideoUrl(video.video_url);
 
@@ -724,99 +1016,264 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
                 <div
                   key={cm.id}
                   ref={(el) => { commentNodeRefs.current[cm.id] = el; }}
-                  className="py-1"
+                  className="py-2"
                 >
-                  <div className="flex gap-2.5 md:gap-3">
-                    <div
-                      className="w-7 h-7 md:w-8 md:h-8 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] md:text-xs font-bold text-white shadow"
-                      style={{ background: 'linear-gradient(135deg, #FE2C55, #ff8c00)' }}
-                    >
-                      {cm.author?.username?.[0]?.toUpperCase()}
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+                      {cm.author?.avatar_url ? (
+                        <img src={getThumbUrl(cm.author.avatar_url)} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div
+                          className="w-full h-full flex items-center justify-center text-[11px] font-bold text-white"
+                          style={{ background: 'linear-gradient(135deg, #FE2C55, #ff8c00)' }}
+                        >
+                          {cm.author?.username?.[0]?.toUpperCase()}
+                        </div>
+                      )}
                     </div>
+
                     <div className="flex-1 min-w-0">
-                      <span className="text-white text-xs font-bold mr-2">@{cm.author?.username}</span>
-                      <span className="text-gray-200 text-[13px] md:text-sm">{cm.content}</span>
+                      <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                        <span className="font-semibold text-gray-300">@{cm.author?.username}</span>
+                        <span>•</span>
+                        <span>{timeAgo(cm.created_at)}</span>
+                      </div>
+
+                      <p className="mt-0.5 text-[14px] leading-[1.35] text-white break-words">{cm.content}</p>
+
                       {cm.image_url && (
                         <img src={getThumbUrl(cm.image_url)} alt="comment" className="mt-2 rounded-xl max-h-40 w-auto border border-white/10" />
                       )}
 
-                      <div className="flex items-center gap-3 mt-1.5">
+                      <div className="mt-1.5 flex items-center gap-4 text-[12px] text-gray-400">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (cm.my_reaction === 'like') removeReaction(cm.id);
+                            else reactComment(cm.id, 'like');
+                          }}
+                          className={`hover:text-white ${cm.my_reaction ? 'text-white' : ''}`}
+                        >
+                          {cm.my_reaction ? `${reactionEmoji(cm.my_reaction)} ${cm.my_reaction}` : 'Like'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReactionPickerFor(prev => prev === cm.id ? null : cm.id);
+                          }}
+                          className="hover:text-white"
+                        >
+                          React
+                        </button>
+                        {totalReactions(cm) > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openReactionModal(cm.id);
+                            }}
+                            className="text-gray-300 hover:text-white inline-flex items-center gap-1"
+                            title="See who reacted"
+                          >
+                            <span>{reactionSummaryEntries(cm.reaction_counts).slice(0, 3).map((entry) => reactionEmoji(entry.type)).join(' ')}</span>
+                            <span>{totalReactions(cm)}</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); startReply(cm); }}
-                          className="text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
+                          className="hover:text-white"
                         >
                           Reply
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setExpandedReplies(prev => ({ ...prev, [cm.id]: !(prev[cm.id] ?? false) }))}
-                          className="text-xs text-gray-400 hover:text-gray-200"
-                        >
-                          {`${(cm.replies || []).length} reply`}
-                        </button>
+                        {(cm.replies || []).length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedReplies(prev => ({ ...prev, [cm.id]: !(prev[cm.id] ?? false) }))}
+                            className="hover:text-white"
+                          >
+                            {(expandedReplies[cm.id] ?? false)
+                              ? 'Hide replies'
+                              : `View ${(cm.replies || []).length} repl${(cm.replies || []).length === 1 ? 'y' : 'ies'}`}
+                          </button>
+                        )}
                         {canDelete(cm.author?.username) && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); deleteComment(cm.id, false); }}
-                            className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+                            className="text-red-400 hover:text-red-300 flex items-center gap-1"
                           >
                             <IoTrash size={12} /> Delete
                           </button>
                         )}
                       </div>
+
+                      {reactionPickerFor === cm.id && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1 rounded-full bg-white/10 border border-white/10 px-2 py-1 w-fit">
+                          {REACTION_OPTIONS.map((r) => (
+                            <button
+                              key={r.type}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); reactComment(cm.id, r.type); }}
+                              className="text-lg hover:scale-110 transition-transform"
+                              title={r.label}
+                            >
+                              {r.emoji}
+                            </button>
+                          ))}
+                          {cm.my_reaction && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); removeReaction(cm.id); }}
+                              className="ml-1 text-xs text-gray-300 hover:text-white"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {(expandedReplies[cm.id] ?? false) && (cm.replies || []).slice(0, visibleReplies[cm.id] || 10).map((rp) => (
-                    <div
-                      key={rp.id}
-                      ref={(el) => { commentNodeRefs.current[rp.id] = el; }}
-                      className="flex gap-2.5 md:gap-3 mt-2 ml-10"
-                    >
-                      <div
-                        className="w-6 h-6 md:w-7 md:h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[9px] md:text-[10px] font-bold text-white shadow"
-                        style={{ background: 'linear-gradient(135deg, #6378ff, #8f66ff)' }}
-                      >
-                        {rp.author?.username?.[0]?.toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-white text-[11px] md:text-xs font-bold mr-2">@{rp.author?.username}</span>
-                        <span className="text-gray-200 text-[13px] md:text-sm">{rp.content}</span>
-                        {rp.image_url && (
-                          <img src={getThumbUrl(rp.image_url)} alt="reply" className="mt-2 rounded-xl max-h-36 w-auto border border-white/10" />
-                        )}
-                        <div className="mt-1.5">
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); startReply(rp); }}
-                            className="text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
-                          >
-                            Reply
-                          </button>
-                        </div>
-                        {canDelete(rp.author?.username) && (
-                          <div className="mt-1.5">
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); deleteComment(rp.id, true, cm.id); }}
-                              className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
-                            >
-                              <IoTrash size={12} /> Delete
-                            </button>
+                  {(expandedReplies[cm.id] ?? false) && (
+                    <div className="ml-11 mt-2 pl-3 border-l border-white/10 space-y-2.5">
+                      {(cm.replies || []).slice(0, visibleReplies[cm.id] || 10).map((rp) => (
+                        <div
+                          key={rp.id}
+                          ref={(el) => { commentNodeRefs.current[rp.id] = el; }}
+                          className="flex items-start gap-2.5"
+                        >
+                          <div className="w-6 h-6 rounded-full overflow-hidden flex-shrink-0">
+                            {rp.author?.avatar_url ? (
+                              <img src={getThumbUrl(rp.author.avatar_url)} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <div
+                                className="w-full h-full flex items-center justify-center text-[9px] font-bold text-white"
+                                style={{ background: 'linear-gradient(135deg, #6378ff, #8f66ff)' }}
+                              >
+                                {rp.author?.username?.[0]?.toUpperCase()}
+                              </div>
+                            )}
                           </div>
-                        )}
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                              <span className="font-semibold text-gray-300">@{rp.author?.username}</span>
+                              <span>•</span>
+                              <span>{timeAgo(rp.created_at)}</span>
+                            </div>
+                            <p className="mt-0.5 text-[13px] leading-[1.35] text-gray-100 break-words">{rp.content}</p>
+
+                            {rp.image_url && (
+                              <img src={getThumbUrl(rp.image_url)} alt="reply" className="mt-2 rounded-xl max-h-36 w-auto border border-white/10" />
+                            )}
+
+                            <div className="mt-1.5 flex items-center gap-4 text-[12px] text-gray-400">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (rp.my_reaction === 'like') removeReaction(rp.id);
+                                  else reactComment(rp.id, 'like');
+                                }}
+                                className={`hover:text-white ${rp.my_reaction ? 'text-white' : ''}`}
+                              >
+                                {rp.my_reaction ? `${reactionEmoji(rp.my_reaction)} ${rp.my_reaction}` : 'Like'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setReactionPickerFor(prev => prev === rp.id ? null : rp.id);
+                                }}
+                                className="hover:text-white"
+                              >
+                                React
+                              </button>
+                              {totalReactions(rp) > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openReactionModal(rp.id);
+                                  }}
+                                  className="text-gray-300 hover:text-white inline-flex items-center gap-1"
+                                  title="See who reacted"
+                                >
+                                  <span>{reactionSummaryEntries(rp.reaction_counts).slice(0, 3).map((entry) => reactionEmoji(entry.type)).join(' ')}</span>
+                                  <span>{totalReactions(rp)}</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); startReply(rp); }}
+                                className="hover:text-white"
+                              >
+                                Reply
+                              </button>
+                              {canDelete(rp.author?.username) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); deleteComment(rp.id, true, cm.id); }}
+                                  className="text-red-400 hover:text-red-300 flex items-center gap-1"
+                                >
+                                  <IoTrash size={12} /> Delete
+                                </button>
+                              )}
+                            </div>
+
+                            {reactionPickerFor === rp.id && (
+                              <div className="mt-2 flex flex-wrap items-center gap-1 rounded-full bg-white/10 border border-white/10 px-2 py-1 w-fit">
+                                {REACTION_OPTIONS.map((r) => (
+                                  <button
+                                    key={r.type}
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); reactComment(rp.id, r.type); }}
+                                    className="text-lg hover:scale-110 transition-transform"
+                                    title={r.label}
+                                  >
+                                    {r.emoji}
+                                  </button>
+                                ))}
+                                {rp.my_reaction && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); removeReaction(rp.id); }}
+                                    className="ml-1 text-xs text-gray-300 hover:text-white"
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                    {!commentsLoading && hasMoreComments && (
+                      <div className="pt-1 pb-2">
+                        <button
+                          type="button"
+                          onClick={loadMoreComments}
+                          disabled={loadingMoreComments}
+                          className="w-full rounded-full py-2 text-sm font-semibold text-white/90 bg-white/10 hover:bg-white/15 disabled:opacity-60 transition-colors"
+                        >
+                          {loadingMoreComments ? 'Loading...' : 'Load more comments'}
+                        </button>
                       </div>
+                    )}
                     </div>
-                  ))}
+                  )}
                   {(expandedReplies[cm.id] ?? false) && (cm.replies || []).length === 0 && (
-                    <div className="ml-10 mt-2 text-xs text-gray-500">No replies yet</div>
+                    <div className="ml-11 mt-2 text-xs text-gray-500">No replies yet</div>
                   )}
                   {(expandedReplies[cm.id] ?? false) && (cm.replies || []).length > (visibleReplies[cm.id] || 10) && (
                     <button
                       type="button"
                       onClick={() => setVisibleReplies(prev => ({ ...prev, [cm.id]: (prev[cm.id] || 10) + 10 }))}
-                      className="ml-10 mt-2 text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
+                      className="ml-11 mt-2 text-xs text-[#9ca7ff] hover:text-[#c1c8ff]"
                     >
                       {`See more +${(cm.replies || []).length - (visibleReplies[cm.id] || 10)}`}
                     </button>
@@ -826,13 +1283,6 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
             </div>
 
             <form onSubmit={submitComment} className="px-3 md:px-4 py-3 border-t border-white/8">
-              {replyTo && (
-                <div className="mb-2 flex items-center justify-between rounded-lg bg-[#22253a] px-3 py-1.5 text-xs text-gray-300">
-                  <span>Replying to @{replyTo.author?.username}</span>
-                  <button type="button" onClick={() => setReplyTo(null)} className="text-gray-400 hover:text-white">Cancel</button>
-                </div>
-              )}
-
               <div className="flex items-center gap-1.5 md:gap-2 mb-2 overflow-x-auto no-scrollbar">
                 {['😀', '😂', '😍', '🔥', '👍', '🎉', '🙏', '❤️'].map((emoji) => (
                   <button
@@ -890,6 +1340,85 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
           </div>
         </div>
       )}
+
+      {reactionModalOpen && (
+        <div
+          className="absolute inset-0 z-[60] flex items-end md:items-center md:justify-center"
+          style={{ background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(5px)' }}
+          onClick={(e) => { e.stopPropagation(); closeReactionModal(); }}
+        >
+          <div
+            className="w-full md:max-w-md rounded-t-3xl md:rounded-2xl max-h-[78vh] md:max-h-[70vh] flex flex-col"
+            style={{ background: 'linear-gradient(180deg, #1f2133 0%, #151622 100%)', border: '1px solid rgba(255,255,255,0.12)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <span className="text-white font-bold">Reactions</span>
+              <button
+                type="button"
+                onClick={closeReactionModal}
+                className="text-gray-400 hover:text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+              >
+                <IoClose size={19} />
+              </button>
+            </div>
+
+            <div className="px-3 py-2 border-b border-white/10 flex items-center gap-2 overflow-x-auto no-scrollbar">
+              <button
+                type="button"
+                onClick={() => setReactionModalFilter('all')}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap ${reactionModalFilter === 'all' ? 'bg-white text-[#111]' : 'bg-white/10 text-gray-200 hover:bg-white/15'}`}
+              >
+                All {reactionModalReactors.length}
+              </button>
+              {reactionSummaryEntries(reactionModalSummary).map((entry) => (
+                <button
+                  key={entry.type}
+                  type="button"
+                  onClick={() => setReactionModalFilter(entry.type)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap ${reactionModalFilter === entry.type ? 'bg-white text-[#111]' : 'bg-white/10 text-gray-200 hover:bg-white/15'}`}
+                >
+                  {reactionEmoji(entry.type)} {entry.count}
+                </button>
+              ))}
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-3 py-2">
+              {reactionModalLoading && (
+                <div className="text-center text-gray-400 py-6">Loading reactions...</div>
+              )}
+
+              {!reactionModalLoading && reactionModalReactors.filter((r) => reactionModalFilter === 'all' ? true : r.type === reactionModalFilter).length === 0 && (
+                <div className="text-center text-gray-400 py-6">No reactions found</div>
+              )}
+
+              {!reactionModalLoading && reactionModalReactors
+                .filter((r) => reactionModalFilter === 'all' ? true : r.type === reactionModalFilter)
+                .map((r) => (
+                  <div key={`${r.user_id}-${r.type}-${r.created_at}`} className="flex items-center justify-between py-2.5 border-b border-white/5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+                        {r.avatar_url ? (
+                          <img src={getThumbUrl(r.avatar_url)} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[11px] font-bold text-white" style={{ background: 'linear-gradient(135deg, #FE2C55, #ff8c00)' }}>
+                            {(r.display_name || r.username || '?').charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm text-white font-semibold truncate">{r.display_name || r.username}</div>
+                        <div className="text-xs text-gray-400 truncate">@{r.username}</div>
+                      </div>
+                    </div>
+                    <div className="text-xl">{reactionEmoji(r.type)}</div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Share sheet - TikTok style */}
       {showShare && (
         <div

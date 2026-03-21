@@ -24,7 +24,7 @@ func Load() *Config {
 	}
 	cfg := &Config{
 		Port:       getEnv("PORT", "8080"),
-		DBURL:      getEnv("DB_URL", "postgres://photcot:photcot123@localhost:5432/photcot?sslmode=disable"),
+		DBURL:      getEnv("DB_URL", ""),
 		RedisURL:   getEnv("REDIS_URL", "localhost:6379"),
 		JWTSecret:  getEnv("JWT_SECRET", ""),
 		JWTExpires: getEnv("JWT_EXPIRES_IN", "24h"),
@@ -32,6 +32,9 @@ func Load() *Config {
 		MaxUpload:  524288000,
 		ResendKey:  getEnv("RESEND_API_KEY", ""),
 		EmailFrom:  getEnv("EMAIL_FROM", "Phatforces <onboarding@resend.dev>"),
+	}
+	if cfg.DBURL == "" {
+		log.Fatal("DB_URL must be set in .env or environment")
 	}
 	if cfg.JWTSecret == "" {
 		log.Fatal("JWT_SECRET must be set in .env or environment")

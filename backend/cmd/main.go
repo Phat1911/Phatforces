@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 	"photcot/internal/config"
 	"photcot/internal/db"
 	"photcot/internal/handlers"
@@ -21,8 +22,9 @@ func main() {
 
 	r := gin.Default()
 
-	// CORS
+	// Security middlewares
 	r.Use(middleware.CORS())
+	r.Use(middleware.HTTPS())
 
 	// Static file serving for uploads
 	r.Static("/uploads", cfg.UploadDir)
@@ -35,13 +37,18 @@ func main() {
 	// API routes
 	api := r.Group("/api/v1")
 	{
+		// Rate limiter: 5 requests per minute per IP for auth endpoints
+		authLimiter := middleware.NewRateLimiter(5, 1*time.Minute)
+
 		// Auth (register, login, OTP)
 		auth := api.Group("/auth")
+		auth.Use(middleware.RateLimit(authLimiter))
 		{
 			authHandler := handlers.NewAuthHandler(database, cfg)
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/refresh", authHandler.RefreshToken)
+			auth.POST("/logout", authHandler.Logout)
 
 			// OTP email verification
 			otpHandler := handlers.NewOTPHandler(database, cfg)
@@ -52,6 +59,11 @@ func main() {
 		// Public routes - no auth required
 		public := api.Group("")
 		{
+			commentStreamHandler := handlers.NewCommentHandler(database, cfg)
+			public.GET("/comments/reactions/stream", commentStreamHandler.StreamCommentReactions)
+			notifPublicHandler := handlers.NewNotificationHandler(database, cfg.JWTSecret)
+			public.GET("/notifications/stream", notifPublicHandler.Stream)
+
 			feedHandler := handlers.NewFeedHandler(database, nil)
 			public.GET("/feed/public", feedHandler.Public)
 			public.GET("/feed/video/:id", feedHandler.PublicVideo)
@@ -98,6 +110,9 @@ func main() {
 			protected.POST("/videos/:id/comments", commentHandler.AddComment)
 			protected.GET("/videos/:id/comments", commentHandler.GetComments)
 			protected.DELETE("/comments/:id", commentHandler.DeleteComment)
+			protected.POST("/comments/:id/reaction", commentHandler.ReactToComment)
+			protected.DELETE("/comments/:id/reaction", commentHandler.RemoveReaction)
+			protected.GET("/comments/:id/reactions", commentHandler.GetCommentReactions)
 
 			// Creator settings + messages
 			creatorSettings := handlers.NewCreatorSettingsHandler(database)
@@ -136,7 +151,7 @@ func main() {
 			protected.DELETE("/search/history", searchHistHandler.ClearSearchHistory)
 
 			// Notifications (authenticated)
-			notifHandler := handlers.NewNotificationHandler(database)
+			notifHandler := handlers.NewNotificationHandler(database, cfg.JWTSecret)
 			protected.GET("/notifications", notifHandler.GetNotifications)
 			protected.GET("/notifications/unread", notifHandler.GetUnreadCount)
 			protected.PATCH("/notifications/read", notifHandler.MarkAllRead)

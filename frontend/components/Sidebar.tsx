@@ -7,7 +7,6 @@ import { BsPerson, BsPersonFill } from 'react-icons/bs';
 import { MdOutlineExplore, MdAdminPanelSettings } from 'react-icons/md';
 import { api } from '@/lib/api';
 import { decodeJwtPayload } from '@/lib/jwt';
-import Cookies from 'js-cookie';
 
 interface Props { onAuthRequired: () => void; }
 
@@ -18,23 +17,31 @@ export default function Sidebar({ onAuthRequired }: Props) {
   const [unread, setUnread] = useState(0);
 
   useEffect(() => {
-    const checkAuth = () => {
-      const token = Cookies.get('photcot_token');
-      setLoggedIn(!!token);
-      if (token) {
-        const payload = decodeJwtPayload(token);
-        setIsAdmin(!!payload?.is_admin);
-      } else {
-        setIsAdmin(false);
-        setUnread(0);
+    const checkAuth = async () => {
+      try {
+        // Try to fetch unread notifications to verify auth status
+        await api.get('/notifications/unread');
+        setLoggedIn(true);
+        // Note: Can't decode token anymore since it's HttpOnly, but auth-exp event can set isAdmin if needed
+      } catch (e) {
+        // If 401, user is not logged in
+        if ((e as any)?.response?.status === 401) {
+          setLoggedIn(false);
+          setIsAdmin(false);
+          setUnread(0);
+        }
       }
     };
     checkAuth();
     window.addEventListener('photcot:auth-changed', checkAuth);
-    window.addEventListener('photcot:auth-expired', checkAuth);
+    window.addEventListener('photcot:auth-expired', () => {
+      setLoggedIn(false);
+      setIsAdmin(false);
+      setUnread(0);
+    });
     return () => {
       window.removeEventListener('photcot:auth-changed', checkAuth);
-      window.removeEventListener('photcot:auth-expired', checkAuth);
+      window.removeEventListener('photcot:auth-expired', () => {});
     };
   }, []);
 
@@ -47,12 +54,23 @@ export default function Sidebar({ onAuthRequired }: Props) {
       } catch { }
     };
     fetchUnread();
+    const base = (api.defaults.baseURL || '').replace(/\/$/, '');
+    let es: EventSource | null = null;
+    // EventSource will automatically include HttpOnly cookie
+    if (base.startsWith('http')) {
+      const streamUrl = `${base}/notifications/stream`;
+      es = new EventSource(streamUrl, { withCredentials: true });
+      es.addEventListener('notification', fetchUnread);
+    }
     const interval = setInterval(fetchUnread, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      es?.close();
+    };
   }, [loggedIn]);
 
   const handleProtected = (e: React.MouseEvent) => {
-    if (!Cookies.get('photcot_token')) { e.preventDefault(); onAuthRequired(); }
+    if (!loggedIn) { e.preventDefault(); onAuthRequired(); }
   };
 
   return (

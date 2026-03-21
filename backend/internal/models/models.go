@@ -56,6 +56,8 @@ type Comment struct {
 	Content   string    `json:"content"`
 	ImageURL  string    `json:"image_url,omitempty"`
 	LikeCount int       `json:"like_count"`
+	ReactionCounts map[string]int `json:"reaction_counts,omitempty"`
+	MyReaction     string         `json:"my_reaction,omitempty"`
 	Replies   []Comment `json:"replies,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -68,7 +70,7 @@ type LoginRequest struct {
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=3,max=50"`
 	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required,min=8"`
 }
 
 type AuthResponse struct {

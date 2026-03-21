@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getThumbUrl } from '@/lib/api';
-import Cookies from 'js-cookie';
 import toast from 'react-hot-toast';
 
 export default function AdminPage() {
@@ -19,8 +18,7 @@ export default function AdminPage() {
   const [videoPage, setVideoPage] = useState(1);
 
   useEffect(() => {
-    const token = Cookies.get('photcot_token');
-    if (!token) { router.push('/'); return; }
+    // Use API probe instead of reading HttpOnly cookie
     loadStats();
   }, [router]);
 

@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import Cookies from 'js-cookie';
 import toast from 'react-hot-toast';
 import { api, getThumbUrl } from '@/lib/api';
-import { decodeJwtPayload } from '@/lib/jwt';
+import { useAuthStore } from '@/lib/store';
 
 interface Peer {
   id: string;
@@ -32,30 +31,32 @@ function formatTime(dateStr: string): string {
 function InboxPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuthStore();
   const [mounted, setMounted] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [peer, setPeer] = useState<Peer | null>(null);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [draft, setDraft] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchingRef = useRef(false);
 
   const withUsername = useMemo(() => {
     const raw = (searchParams.get('with') || '').trim();
     return raw.startsWith('@') ? raw.slice(1) : raw;
   }, [searchParams]);
 
-  const myUserID = useMemo(() => {
-    const token = Cookies.get('photcot_token');
-    if (!token) return '';
-    const payload = decodeJwtPayload(token);
-    const id = payload?.user_id;
-    return typeof id === 'string' ? id : '';
-  }, [mounted]);
+  // Get user ID from store (persisted in localStorage) instead of decoding HttpOnly cookie
+  const myUserID = user?.id ?? '';
 
-  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
+  const isLoggedIn = () => mounted && loggedIn;
 
-  const fetchConversation = useCallback(async () => {
+  const fetchConversation = useCallback(async (opts?: { showLoading?: boolean; silent?: boolean }) => {
+    const showLoading = opts?.showLoading ?? true;
+    const silent = opts?.silent ?? false;
+    if (fetchingRef.current) return;
     if (!mounted) return;
     if (!isLoggedIn()) {
       setLoading(false);
@@ -66,25 +67,50 @@ function InboxPageContent() {
       return;
     }
 
-    setLoading(true);
+    fetchingRef.current = true;
+    if (showLoading) setLoading(true);
     try {
       const res = await api.get(`/messages/with/${encodeURIComponent(withUsername)}`);
       setPeer(res.data.peer || null);
       setMessages(res.data.messages || []);
     } catch (e: any) {
-      const msg = e?.response?.data?.error || 'Could not load conversation';
-      toast.error(msg);
+      if (!silent) {
+        const msg = e?.response?.data?.error || 'Could not load conversation';
+        toast.error(msg);
+      }
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
+      fetchingRef.current = false;
     }
   }, [mounted, withUsername]);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    // API probe for HttpOnly cookie auth check
+    api.get('/notifications/unread')
+      .then(() => setLoggedIn(true))
+      .catch(() => setLoggedIn(false));
+  }, []);
 
   useEffect(() => {
     if (!mounted) return;
-    fetchConversation();
+    fetchConversation({ showLoading: true, silent: false });
   }, [mounted, fetchConversation]);
+
+  useEffect(() => {
+    if (!mounted || !withUsername || !isLoggedIn()) return;
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(() => {
+      fetchConversation({ showLoading: false, silent: true });
+    }, 2000);
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [mounted, withUsername, fetchConversation]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -107,6 +133,10 @@ function InboxPageContent() {
       };
       setMessages((prev) => [...prev, optimistic]);
       setDraft('');
+      // Reconcile optimistic message with authoritative server list shortly after send.
+      setTimeout(() => {
+        fetchConversation({ showLoading: false, silent: true });
+      }, 250);
     } catch (e: any) {
       const msg = e?.response?.data?.error || 'Could not send message';
       toast.error(msg);
