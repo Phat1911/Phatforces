@@ -1,8 +1,9 @@
 import axios from 'axios';
 
 const isProd = process.env.NODE_ENV === 'production';
-const API_URL = process.env.NEXT_PUBLIC_API_URL || (isProd ? 'https://api.phatforces.me/api/v1' : 'http://localhost:8080/api/v1');
-const UPLOADS_URL = process.env.NEXT_PUBLIC_UPLOADS_URL || (isProd ? 'https://api.phatforces.me' : 'http://localhost:8080');
+const cleanUrl = (value: string | undefined, fallback: string) => (value || fallback).trim().replace(/[\r\n]+/g, '');
+const API_URL = cleanUrl(process.env.NEXT_PUBLIC_API_URL, isProd ? 'https://api.phatforces.me/api/v1' : 'http://localhost:8080/api/v1');
+const UPLOADS_URL = cleanUrl(process.env.NEXT_PUBLIC_UPLOADS_URL, isProd ? 'https://api.phatforces.me' : 'http://localhost:8080');
 
 export const api = axios.create({
   baseURL: API_URL,

@@ -710,7 +710,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
 
     // EventSource will automatically include HttpOnly cookie with the request
     const streamUrl = `${base}/comments/reactions/stream?video_id=${encodeURIComponent(video.id)}`;
-    const es = new EventSource(streamUrl, { withCredentials: true });
+    const es = new EventSource(streamUrl);
 
     es.addEventListener('connected', () => {
       setReactionSSEConnected(true);

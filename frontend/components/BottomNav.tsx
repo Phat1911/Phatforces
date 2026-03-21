@@ -29,7 +29,7 @@ export default function BottomNav({ onAuthRequired }: Props) {
     // EventSource will automatically include HttpOnly cookie
     if (base.startsWith('http')) {
       const streamUrl = `${base}/notifications/stream`;
-      es = new EventSource(streamUrl, { withCredentials: true });
+      es = new EventSource(streamUrl);
       es.addEventListener('notification', fetchUnread);
     }
     const interval = setInterval(fetchUnread, 30000);

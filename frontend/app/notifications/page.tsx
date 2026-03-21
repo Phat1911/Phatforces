@@ -83,7 +83,7 @@ export default function NotificationsPage() {
 
     // EventSource will automatically include HttpOnly cookie
     const streamUrl = `${base}/notifications/stream`;
-    const es = new EventSource(streamUrl, { withCredentials: true });
+    const es = new EventSource(streamUrl);
 
     es.addEventListener('notification', () => {
       fetchNotifications();
