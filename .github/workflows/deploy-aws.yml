@@ -42,38 +42,63 @@ jobs:
           script: |
             set -e
             ACR="photcotregistry.azurecr.io"
-            ENV_FILE="/home/azureuser/photcot/backend/.env"
+            REPO="/home/azureuser/photcot"
+            ENV_FILE="$REPO/backend/.env"
+            NGINX_CONF="$REPO/deploy/nginx/phatforces.conf"
+            SSL_DIR="$REPO/deploy/nginx/ssl"
+
             echo "${{ secrets.ACR_PASSWORD }}" | docker login $ACR -u "${{ secrets.ACR_USERNAME }}" --password-stdin
+
+            # Pull latest code so nginx conf / docker-compose files are up to date
+            if [[ -d "$REPO/.git" ]]; then
+              git -C "$REPO" pull origin main || true
+            fi
+
+            # Ensure shared Docker network exists (required for nginx hostname resolution)
+            docker network create photcot-net 2>/dev/null || true
+
+            # --- Stop ALL old containers regardless of name scheme ---
+            for c in backend photcot-backend frontend photcot-frontend nginx photcot-nginx; do
+              docker stop $c 2>/dev/null || true
+              docker rm   $c 2>/dev/null || true
+            done
 
             # --- Backend ---
             docker pull $ACR/photcot-backend:latest
-            docker stop photcot-backend 2>/dev/null || true
-            docker rm   photcot-backend 2>/dev/null || true
             if [[ -f "$ENV_FILE" ]]; then
-              docker run -d --name photcot-backend --restart unless-stopped --network host \
+              docker run -d --name backend --restart unless-stopped \
+                --network photcot-net \
                 --env-file "$ENV_FILE" \
                 -e PORT=8080 \
-                -v /home/azureuser/photcot/backend/uploads:/app/uploads \
+                -v "$REPO/backend/uploads:/app/uploads" \
                 $ACR/photcot-backend:latest
             else
               echo "WARNING: $ENV_FILE not found — backend started without env file. Create it and redeploy."
-              docker run -d --name photcot-backend --restart unless-stopped --network host \
+              docker run -d --name backend --restart unless-stopped \
+                --network photcot-net \
                 -e PORT=8080 \
-                -v /home/azureuser/photcot/backend/uploads:/app/uploads \
+                -v "$REPO/backend/uploads:/app/uploads" \
                 $ACR/photcot-backend:latest
             fi
 
-            # --- Frontend (always runs, independent of backend) ---
+            # --- Frontend ---
             docker pull $ACR/photcot-frontend:latest
-            docker stop photcot-frontend 2>/dev/null || true
-            docker rm   photcot-frontend 2>/dev/null || true
-            docker run -d --name photcot-frontend --restart unless-stopped --network host \
+            docker run -d --name frontend --restart unless-stopped \
+              --network photcot-net \
               -e NEXT_PUBLIC_API_URL=https://api.phatforces.me/api/v1 \
               -e NEXT_PUBLIC_UPLOADS_URL=https://api.phatforces.me \
               -e NODE_ENV=production \
               $ACR/photcot-frontend:latest
 
-            sleep 3
-            curl -s http://localhost:8080/api/health
+            # --- Nginx ---
+            docker run -d --name nginx --restart unless-stopped \
+              --network photcot-net \
+              -p 80:80 -p 443:443 \
+              -v "$NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" \
+              -v "$SSL_DIR:/etc/nginx/ssl:ro" \
+              nginx:1.27-alpine
+
+            sleep 5
+            curl -sf http://localhost:8080/api/health && echo " — backend OK"
             echo ""
-            docker ps --format "table {{.Names}}\t{{.Status}}"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
