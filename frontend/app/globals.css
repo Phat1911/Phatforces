@@ -33,10 +33,11 @@ body {
 }
 .video-feed-container::-webkit-scrollbar { display: none; }
 
-/* On desktop (md+), no bottom nav - use full height */
+/* On desktop (md+), no bottom nav - subtract header height */
 @media (min-width: 768px) {
   :root {
     --mobile-bottom-nav-height: 0px;
+    --desktop-header-height: 48px;
     --mobile-playbar-height: 0px;
     --video-info-bottom-offset: 0.5rem;
     --video-info-min-height: 0px;
@@ -44,7 +45,7 @@ body {
   }
 
   .video-feed-container {
-    height: 100dvh;
+    height: calc(100dvh - var(--desktop-header-height));
   }
 }
 
@@ -73,6 +74,6 @@ body {
 
 @media (min-width: 768px) {
   .video-item {
-    height: 100dvh;
+    height: calc(100dvh - var(--desktop-header-height));
   }
 }

@@ -309,7 +309,7 @@ function HomePage() {
 
   if (!mounted) {
     return (
-      <div className="flex h-screen bg-[#161823]">
+      <div className="flex h-[100dvh] bg-[#161823]">
         <div className="hidden md:flex flex-col w-64 border-r border-[#2D2F3E]" />
         <div className="flex-1 flex items-center justify-center">
           <div className="w-10 h-10 border-2 border-[#FE2C55] border-t-transparent rounded-full animate-spin" />
@@ -326,7 +326,7 @@ function HomePage() {
   const windowEnd   = Math.min(videos.length - 1, currentIndex + WINDOW_HALF);
 
   return (
-    <div className="flex h-screen bg-[#161823]">
+    <div className="flex h-[100dvh] bg-[#161823]">
       <Sidebar onAuthRequired={() => setShowAuth(true)} />
       <div className="flex-1 flex flex-col">
         <div className="absolute top-0 left-0 right-0 z-20 flex justify-center gap-8 pt-4 pb-2 bg-gradient-to-b from-black/60 to-transparent pointer-events-none md:pointer-events-auto md:static md:bg-transparent md:justify-start md:px-4">
