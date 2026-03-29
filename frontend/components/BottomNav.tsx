@@ -7,6 +7,7 @@ import { BsPerson, BsPersonFill } from 'react-icons/bs';
 import { MdAdminPanelSettings } from 'react-icons/md';
 import { api } from '@/lib/api';
 import { decodeJwtPayload } from '@/lib/jwt';
+import { videoController } from '@/lib/videoController';
 
 interface Props { onAuthRequired: () => void; }
 
@@ -84,12 +85,21 @@ export default function BottomNav({ onAuthRequired }: Props) {
     if (!loggedIn) { e.preventDefault(); onAuthRequired(); }
   };
 
+  const handleHome = (e: React.MouseEvent) => {
+    if (pathname === '/') {
+      e.preventDefault();
+      videoController.stopAll();
+      const container = document.getElementById('feed-container');
+      if (container) container.scrollTop = 0;
+    }
+  };
+
   return (
     <nav
       className="md:hidden fixed bottom-0 left-0 right-0 z-30 flex items-center bg-[#161823]"
       style={{ height: 'calc(56px + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      <Link href="/" className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${pathname === '/' ? 'text-white' : 'text-gray-500'}`}>
+      <Link href="/" onClick={handleHome} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${pathname === '/' ? 'text-white' : 'text-gray-500'}`}>
         {pathname === '/' ? <AiFillHome size={24}/> : <AiOutlineHome size={24}/>}
         <span className="text-[10px]">Home</span>
       </Link>
