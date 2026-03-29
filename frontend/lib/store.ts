@@ -36,6 +36,7 @@ export interface Video {
   hashtags: string[];
   is_liked: boolean;
   is_saved: boolean;
+  is_watched: boolean;
   created_at: string;
 }
 
