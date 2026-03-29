@@ -41,7 +41,7 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
             ACR="photcotregistry.azurecr.io"
-            REPO="/home/hong_phat/photcot"
+            REPO="$HOME/photcot"
             ENV_FILE="$REPO/backend/.env"
 
             echo "${{ secrets.ACR_PASSWORD }}" | docker login $ACR -u "${{ secrets.ACR_USERNAME }}" --password-stdin
