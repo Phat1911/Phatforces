@@ -30,6 +30,7 @@ body {
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
   scrollbar-width: none;
+  background: #000;
 }
 .video-feed-container::-webkit-scrollbar { display: none; }
 
@@ -50,7 +51,7 @@ body {
 }
 
 .video-item {
-  height: calc(100dvh - var(--mobile-bottom-nav-height));
+  height: 100%;
   scroll-snap-align: start;
   position: relative;
   display: flex;
@@ -74,6 +75,6 @@ body {
 
 @media (min-width: 768px) {
   .video-item {
-    height: calc(100dvh - var(--desktop-header-height));
+    height: 100%;
   }
 }

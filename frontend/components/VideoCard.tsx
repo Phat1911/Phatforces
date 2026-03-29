@@ -874,19 +874,19 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
           onTouchStart={handleSeekStart}
           onClick={e => e.stopPropagation()}
         >
-          {/* Track background */}
-          <div className="absolute left-0 right-0 rounded-full" style={{ height: isSeeking ? '4px' : '2px', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.2)' }}>
+          {/* Track background — pinned to bottom so no gap below the track */}
+          <div className="absolute left-0 right-0 rounded-full" style={{ height: isSeeking ? '4px' : '2px', bottom: 0, background: 'rgba(255,255,255,0.2)' }}>
             {/* Progress fill */}
             <div
               className="h-full rounded-full"
               style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #FE2C55, #ff6b6b)', transition: isSeeking ? 'none' : 'width 0.1s linear' }}
             />
           </div>
-          {/* Seek thumb - visible while seeking */}
+          {/* Seek thumb - visible while seeking; top:6px centers it on the 4px track at bottom:0 inside a 16px container */}
           {isSeeking && (
             <div
-              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full shadow-lg border-2 border-white pointer-events-none"
-              style={{ left: `calc(${progress}% - 8px)`, background: '#FE2C55', boxShadow: '0 0 8px rgba(254,44,85,0.8)' }}
+              className="absolute w-4 h-4 rounded-full shadow-lg border-2 border-white pointer-events-none"
+              style={{ left: `calc(${progress}% - 8px)`, top: '6px', background: '#FE2C55', boxShadow: '0 0 8px rgba(254,44,85,0.8)' }}
             />
           )}
         </div>
