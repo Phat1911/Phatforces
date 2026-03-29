@@ -114,6 +114,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
   // Tracks whether the "please login" toast has been shown for this panel open
   // so it only fires once per open, not on every SSE-triggered reload.
   const loginToastShownRef = useRef(false);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -847,7 +848,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       <button
         data-mute-btn="true"
         onClick={toggleMute}
-        className="absolute top-10 right-4 z-50 w-10 h-10 bg-black/40 backdrop-blur-sm border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-black/60 transition-all shadow-lg"
+        className="absolute top-[44%] right-4 z-50 w-10 h-10 bg-black/40 backdrop-blur-sm border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-black/60 transition-all shadow-lg"
       >
         {muted ? <BsVolumeMute size={18} /> : <BsVolumeUp size={18} />}
       </button>
@@ -910,6 +911,32 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
         </Link>
         {video.title && (
           <p className="text-sm text-white font-semibold drop-shadow-lg line-clamp-2 mb-1 leading-snug">{video.title}</p>
+        )}
+        {video.description && (
+          <div 
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              setDescriptionExpanded(!descriptionExpanded); 
+            }}
+            className={`cursor-pointer transition-all duration-200 ${descriptionExpanded ? 'mb-2' : ''}`}
+          >
+            {descriptionExpanded ? (
+              <p className="text-sm text-white drop-shadow-lg mb-1 leading-snug whitespace-pre-wrap max-h-[40vh] overflow-y-auto">
+                {video.description}
+              </p>
+            ) : (
+              <p className="text-sm text-white drop-shadow-lg mb-1 leading-snug">
+                {video.description.length > 80 ? (
+                  <>
+                    {video.description.slice(0, 80)}
+                    <span className="text-gray-300">...See more</span>
+                  </>
+                ) : (
+                  video.description
+                )}
+              </p>
+            )}
+          </div>
         )}
         {video.hashtags?.length > 0 && (
           <p className="text-xs font-bold" style={{ color: '#ff6b8a' }}>

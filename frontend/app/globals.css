@@ -9,9 +9,9 @@
   --real-gap: calc(56px + env(safe-area-inset-bottom) + 3px);
   --mobile-playbar-height: 4px;
   --playbar-gap: 0px;
-  --video-info-bottom-offset: var(--mobile-playbar-height);
+  --video-info-bottom-offset: calc(var(--mobile-bottom-nav-height) + var(--mobile-playbar-height));
   --video-info-min-height: 5rem;
-  --video-actions-bottom-offset: calc(var(--mobile-playbar-height) + var(--video-info-min-height));
+  --video-actions-bottom-offset: calc(var(--mobile-bottom-nav-height) + var(--mobile-playbar-height) + var(--video-info-min-height));
 }
 
 body {
@@ -26,7 +26,7 @@ body {
 ::-webkit-scrollbar-thumb { background: #2D2F3E; border-radius: 2px; }
 
 .video-feed-container {
-  height: calc(100dvh - var(--mobile-bottom-nav-height));
+  height: 100dvh;
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
   scrollbar-width: none;
