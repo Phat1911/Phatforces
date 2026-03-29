@@ -86,38 +86,40 @@ export default function BottomNav({ onAuthRequired }: Props) {
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-30 flex justify-around items-center bg-[#161823]"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-30 flex items-center bg-[#161823]"
       style={{ height: 'calc(56px + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      <Link href="/" className={`flex flex-col items-center gap-0.5 ${pathname === '/' ? 'text-white' : 'text-gray-500'}`}>
+      <Link href="/" className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${pathname === '/' ? 'text-white' : 'text-gray-500'}`}>
         {pathname === '/' ? <AiFillHome size={24}/> : <AiOutlineHome size={24}/>}
         <span className="text-[10px]">Home</span>
       </Link>
-      <Link href="/search" className={`flex flex-col items-center gap-0.5 ${pathname === '/search' ? 'text-white' : 'text-gray-500'}`}>
+      <Link href="/search" className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${pathname === '/search' ? 'text-white' : 'text-gray-500'}`}>
         <AiOutlineSearch size={24}/>
         <span className="text-[10px]">Search</span>
       </Link>
       <Link href="/upload" onClick={handleProtected}
-        className="flex items-center justify-center w-12 h-8 bg-[#FE2C55] rounded-lg text-white">
-        <AiOutlinePlusSquare size={22}/>
+        className="flex-1 flex items-center justify-center">
+        <span className="flex items-center justify-center w-12 h-8 bg-[#FE2C55] rounded-lg text-white">
+          <AiOutlinePlusSquare size={22}/>
+        </span>
       </Link>
       <Link href="/notifications" onClick={handleProtected}
-        className={`flex flex-col items-center gap-0.5 relative ${pathname === '/notifications' ? 'text-white' : 'text-gray-500'}`}>
+        className={`flex-1 flex flex-col items-center justify-center gap-0.5 relative ${pathname === '/notifications' ? 'text-white' : 'text-gray-500'}`}>
         {pathname === '/notifications' ? <AiFillBell size={24}/> : <AiOutlineBell size={24}/>}
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 bg-[#FE2C55] text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+          <span className="absolute top-1 right-[calc(50%-20px)] bg-[#FE2C55] text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
-        <span className="text-[10px]">Nortification</span>
+        <span className="text-[10px]">Notification</span>
       </Link>
       <Link href="/profile" onClick={handleProtected}
-        className={`flex flex-col items-center gap-0.5 ${pathname === '/profile' ? 'text-white' : 'text-gray-500'}`}>
+        className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${pathname === '/profile' ? 'text-white' : 'text-gray-500'}`}>
         {pathname === '/profile' ? <BsPersonFill size={24}/> : <BsPerson size={24}/>}
         <span className="text-[10px]">Profile</span>
       </Link>
       {isAdmin && (
-        <Link href="/admin" className={`flex flex-col items-center gap-0.5 ${pathname === '/admin' ? 'text-white' : 'text-gray-500'}`}>
+        <Link href="/admin" className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${pathname === '/admin' ? 'text-white' : 'text-gray-500'}`}>
           <MdAdminPanelSettings size={24}/>
           <span className="text-[10px]">Admin</span>
         </Link>
