@@ -851,6 +851,15 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       )}
 
 
+      {/* Mute button */}
+      <button
+        data-mute-btn="true"
+        onClick={toggleMute}
+        className="absolute top-4 right-4 z-50 w-10 h-10 bg-black/40 backdrop-blur-sm border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-black/60 transition-all shadow-lg"
+      >
+        {muted ? <BsVolumeMute size={18} /> : <BsVolumeUp size={18} />}
+      </button>
+
       {/* Seekable Play Bar */}
       <div
         className="absolute bottom-0 left-0 right-0 z-50 px-0 pb-0 select-none"
@@ -1034,18 +1043,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
           <span className="text-xs font-bold text-white drop-shadow">{video.share_count > 0 ? fmt(video.share_count) : 'Share'}</span>
         </button>
 
-        {/* Mute */}
-        <button
-          data-mute-btn="true"
-          data-action-btn="true"
-          onClick={toggleMute}
-          className="flex flex-col items-center gap-0.5 group"
-        >
-          <div className="w-12 h-12 rounded-full flex items-center justify-center bg-black/30 backdrop-blur-sm border border-white/10 shadow-lg group-hover:scale-110 transition-transform">
-            {muted ? <BsVolumeMute size={22} className="text-white drop-shadow" /> : <BsVolumeUp size={22} className="text-white drop-shadow" />}
-          </div>
-          <span className="text-xs font-bold text-white drop-shadow">{muted ? 'Muted' : 'Sound'}</span>
-        </button>
+
       </div>
 
       {/* Comments drawer */}
