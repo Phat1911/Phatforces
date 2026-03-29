@@ -893,7 +893,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       </div>
 
       {/* Bottom info */}
-      <div className="absolute left-0 right-0 p-4 pr-24 md:pr-4" style={{ bottom: 'var(--video-info-bottom-offset)', minHeight: 'var(--video-info-min-height)', background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
+      <div className="absolute left-0 right-0 px-4 pt-3 pb-1 pr-24 md:pr-4" style={{ bottom: 'var(--video-info-bottom-offset)', minHeight: 'var(--video-info-min-height)', background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
         <Link
           href={`/${video.author?.username}`}
           className="flex items-center gap-2 mb-2"

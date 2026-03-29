@@ -7,10 +7,10 @@
 :root {
   --mobile-bottom-nav-height: calc(56px + env(safe-area-inset-bottom));
   --real-gap: calc(56px + env(safe-area-inset-bottom) + 3px);
-  --mobile-playbar-height: 10px;
+  --mobile-playbar-height: 4px;
   --playbar-gap: 0px;
   --video-info-bottom-offset: var(--mobile-playbar-height);
-  --video-info-min-height: 6.25rem;
+  --video-info-min-height: 5rem;
   --video-actions-bottom-offset: calc(var(--mobile-playbar-height) + var(--video-info-min-height));
 }
 
