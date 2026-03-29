@@ -42,7 +42,7 @@ jobs:
           script: |
             set -e
             ACR="photcotregistry.azurecr.io"
-            REPO="/home/azureuser/photcot"
+            REPO="/home/hong_phat/photcot"
             ENV_FILE="$REPO/backend/.env"
 
             echo "${{ secrets.ACR_PASSWORD }}" | docker login $ACR -u "${{ secrets.ACR_USERNAME }}" --password-stdin
