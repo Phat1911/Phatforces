@@ -2,10 +2,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getThumbUrl, getVideoUrl } from '@/lib/api';
+import { hasAuthToken } from '@/lib/auth';
 import { useAuthStore } from '@/lib/store';
-import { AiOutlineSearch, AiFillPlayCircle, AiFillHeart, AiOutlineClose, AiOutlineDelete } from 'react-icons/ai';
+import { AiOutlineSearch, AiFillPlayCircle, AiFillHeart, AiOutlineClose, AiOutlineDelete, AiOutlineEye } from 'react-icons/ai';
 import { MdHistory } from 'react-icons/md';
-import Cookies from 'js-cookie';
 
 interface HistoryEntry {
   id: string;
@@ -28,7 +28,7 @@ export default function SearchPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
+  const isLoggedIn = () => mounted && hasAuthToken();
 
   // Fetch history when input is focused and user is logged in
   const fetchHistory = async () => {
@@ -247,6 +247,11 @@ export default function SearchPage() {
                         <img src={getThumbUrl(v.thumbnail_url)} className="w-full h-full object-cover" alt={v.title} />
                       ) : (
                         <video src={getVideoUrl(v.video_url)} className="w-full h-full object-cover" muted preload="metadata" />
+                      )}
+                      {v.is_watched && (
+                        <div className="absolute top-1 left-1 bg-black/60 rounded-full p-1 z-10" title="Watched">
+                          <AiOutlineEye className="text-white" size={14} />
+                        </div>
                       )}
                       <div className="absolute inset-0 bg-black/20 group-hover:bg-black/50 transition-all flex items-center justify-center">
                         <AiFillPlayCircle size={52} className="text-white opacity-0 group-hover:opacity-90 transition-opacity drop-shadow-lg scale-90 group-hover:scale-100 transform duration-200" />

@@ -10,6 +10,16 @@ import { decodeJwtPayload } from '@/lib/jwt';
 
 interface Props { onAuthRequired: () => void; }
 
+function getIsAdminFromToken(): boolean {
+  if (typeof window === 'undefined') return false;
+  const token = localStorage.getItem('photcot_token');
+  if (!token) return false;
+  const payload = decodeJwtPayload(token);
+  if (!payload) return false;
+  const claim = payload.is_admin;
+  return claim === true || claim === 'true' || claim === 1;
+}
+
 export default function Sidebar({ onAuthRequired }: Props) {
   const pathname = usePathname();
   const [loggedIn, setLoggedIn] = useState(false);
@@ -22,7 +32,7 @@ export default function Sidebar({ onAuthRequired }: Props) {
         // Try to fetch unread notifications to verify auth status
         await api.get('/notifications/unread');
         setLoggedIn(true);
-        // Note: Can't decode token anymore since it's HttpOnly, but auth-exp event can set isAdmin if needed
+        setIsAdmin(getIsAdminFromToken());
       } catch (e) {
         // If 401, user is not logged in
         if ((e as any)?.response?.status === 401) {
@@ -32,16 +42,17 @@ export default function Sidebar({ onAuthRequired }: Props) {
         }
       }
     };
-    checkAuth();
-    window.addEventListener('photcot:auth-changed', checkAuth);
-    window.addEventListener('photcot:auth-expired', () => {
+    const onAuthExpired = () => {
       setLoggedIn(false);
       setIsAdmin(false);
       setUnread(0);
-    });
+    };
+    checkAuth();
+    window.addEventListener('photcot:auth-changed', checkAuth);
+    window.addEventListener('photcot:auth-expired', onAuthExpired);
     return () => {
       window.removeEventListener('photcot:auth-changed', checkAuth);
-      window.removeEventListener('photcot:auth-expired', () => {});
+      window.removeEventListener('photcot:auth-expired', onAuthExpired);
     };
   }, []);
 
@@ -86,7 +97,7 @@ export default function Sidebar({ onAuthRequired }: Props) {
         href="/notifications"
         icon={<AiOutlineBell size={26}/>}
         activeIcon={<AiFillBell size={26}/>}
-        label="Inbox"
+        label="Nortification"
         active={pathname === '/notifications'}
         onClick={handleProtected}
         badge={unread}

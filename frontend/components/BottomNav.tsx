@@ -4,9 +4,21 @@ import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { AiFillHome, AiOutlineHome, AiOutlineSearch, AiOutlinePlusSquare, AiOutlineBell, AiFillBell } from 'react-icons/ai';
 import { BsPerson, BsPersonFill } from 'react-icons/bs';
+import { MdAdminPanelSettings } from 'react-icons/md';
 import { api } from '@/lib/api';
+import { decodeJwtPayload } from '@/lib/jwt';
 
 interface Props { onAuthRequired: () => void; }
+
+function getIsAdminFromToken(): boolean {
+  if (typeof window === 'undefined') return false;
+  const token = localStorage.getItem('photcot_token');
+  if (!token) return false;
+  const payload = decodeJwtPayload(token);
+  if (!payload) return false;
+  const claim = payload.is_admin;
+  return claim === true || claim === 'true' || claim === 1;
+}
 
 export default function BottomNav({ onAuthRequired }: Props) {
   const pathname = usePathname();
@@ -40,21 +52,32 @@ export default function BottomNav({ onAuthRequired }: Props) {
   }, [mounted]);
 
   const [loggedIn, setLoggedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
         await api.get('/notifications/unread');
         setLoggedIn(true);
+        setIsAdmin(getIsAdminFromToken());
       } catch (e) {
         if ((e as any)?.response?.status === 401) {
           setLoggedIn(false);
+          setIsAdmin(false);
         }
       }
     };
+    const onAuthExpired = () => {
+      setLoggedIn(false);
+      setIsAdmin(false);
+    };
     checkAuth();
-    window.addEventListener('photcot:auth-expired', () => setLoggedIn(false));
-    return () => window.removeEventListener('photcot:auth-expired', () => {});
+    window.addEventListener('photcot:auth-changed', checkAuth);
+    window.addEventListener('photcot:auth-expired', onAuthExpired);
+    return () => {
+      window.removeEventListener('photcot:auth-changed', checkAuth);
+      window.removeEventListener('photcot:auth-expired', onAuthExpired);
+    };
   }, []);
 
   const handleProtected = (e: React.MouseEvent) => {
@@ -86,13 +109,19 @@ export default function BottomNav({ onAuthRequired }: Props) {
             {unread > 9 ? '9+' : unread}
           </span>
         )}
-        <span className="text-[10px]">Inbox</span>
+        <span className="text-[10px]">Nortification</span>
       </Link>
       <Link href="/profile" onClick={handleProtected}
         className={`flex flex-col items-center gap-0.5 ${pathname === '/profile' ? 'text-white' : 'text-gray-500'}`}>
         {pathname === '/profile' ? <BsPersonFill size={24}/> : <BsPerson size={24}/>}
         <span className="text-[10px]">Profile</span>
       </Link>
+      {isAdmin && (
+        <Link href="/admin" className={`flex flex-col items-center gap-0.5 ${pathname === '/admin' ? 'text-white' : 'text-gray-500'}`}>
+          <MdAdminPanelSettings size={24}/>
+          <span className="text-[10px]">Admin</span>
+        </Link>
+      )}
     </nav>
   );
 }

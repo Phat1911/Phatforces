@@ -111,6 +111,9 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
   const commentInputRef = useRef<HTMLInputElement>(null);
   const commentNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const handledDeepLinkCommentRef = useRef<string | null>(null);
+  // Tracks whether the "please login" toast has been shown for this panel open
+  // so it only fires once per open, not on every SSE-triggered reload.
+  const loginToastShownRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -158,35 +161,36 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     handledDeepLinkCommentRef.current = targetCommentId;
     onTargetCommentHandled?.();
     const ensureOpened = async () => {
-      if (!showComments) {
-        await openComments();
+      // Always fetch fresh comments and use the returned data (avoid stale closure)
+      const loadedComments = await openComments();
+      const allComments = loadedComments.length > 0 ? loadedComments : comments;
+      // Wait a tick for React to render the comment nodes before scrolling
+      await new Promise(resolve => setTimeout(resolve, 300));
+      let parentId: string | null = null;
+      for (const cm of allComments) {
+        if (cm.id === targetCommentId) {
+          parentId = null;
+          break;
+        }
+        const idx = (cm.replies || []).findIndex(rp => rp.id === targetCommentId);
+        if (idx >= 0) {
+          parentId = cm.id;
+          setExpandedReplies(prev => ({ ...prev, [cm.id]: true }));
+          setVisibleReplies(prev => ({ ...prev, [cm.id]: Math.max(prev[cm.id] || 10, idx + 1, 10) }));
+          break;
+        }
       }
-      setTimeout(() => {
-        let parentId: string | null = null;
-        for (const cm of comments) {
-          if (cm.id === targetCommentId) {
-            parentId = null;
-            break;
-          }
-          const idx = (cm.replies || []).findIndex(rp => rp.id === targetCommentId);
-          if (idx >= 0) {
-            parentId = cm.id;
-            setExpandedReplies(prev => ({ ...prev, [cm.id]: true }));
-            setVisibleReplies(prev => ({ ...prev, [cm.id]: Math.max(prev[cm.id] || 10, idx + 1, 10) }));
-            break;
-          }
-        }
-        const el = commentNodeRefs.current[targetCommentId];
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          el.classList.add('ring-2', 'ring-[#FE2C55]');
-          setTimeout(() => el.classList.remove('ring-2', 'ring-[#FE2C55]'), 2200);
-        }
-        if (!el && parentId) {
-          const parentEl = commentNodeRefs.current[parentId];
-          parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 220);
+      // Wait for expanded replies to render
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const el = commentNodeRefs.current[targetCommentId];
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2', 'ring-[#FE2C55]');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-[#FE2C55]'), 2200);
+      } else if (parentId) {
+        const parentEl = commentNodeRefs.current[parentId];
+        parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     };
     ensureOpened();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -374,12 +378,18 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     } catch { toast.error('Failed to save'); }
   };
 
-  const openComments = async (force = false) => {
+  const openComments = async (force = false): Promise<Comment[]> => {
     setShowComments(true);
-    if (!force && comments.length > 0) return;
+    if (!force && comments.length > 0) return comments;
+    if (!force) {
+      // Reset the login-toast guard each time the panel is freshly opened
+      loginToastShownRef.current = false;
+    }
     if (force) {
       setCommentsPage(1);
       setHasMoreComments(false);
+      // Don't clear existing comments on force-reload to prevent layout jerk.
+      // New comments will replace them once loaded.
     }
     setCommentsLoading(true);
     try {
@@ -391,7 +401,20 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       setCommentCount(countAllComments(loaded));
       setCommentsPage(1);
       setHasMoreComments(Boolean(res.data.has_more));
-    } catch { toast.error('Could not load comments'); }
+      return loaded;
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 401) {
+        // Not logged in - show hint once per panel open, not on every SSE retry
+        if (!loginToastShownRef.current) {
+          loginToastShownRef.current = true;
+          toast.error('Please login to see comments');
+        }
+      } else {
+        toast.error('Could not load comments');
+      }
+      return [];
+    }
     finally { setCommentsLoading(false); }
   };
 
@@ -824,14 +847,14 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       <button
         data-mute-btn="true"
         onClick={toggleMute}
-        className="absolute top-10 right-4 z-30 w-10 h-10 bg-black/40 backdrop-blur-sm border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-black/60 transition-all shadow-lg"
+        className="absolute top-10 right-4 z-50 w-10 h-10 bg-black/40 backdrop-blur-sm border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-black/60 transition-all shadow-lg"
       >
         {muted ? <BsVolumeMute size={18} /> : <BsVolumeUp size={18} />}
       </button>
 
       {/* Seekable Play Bar */}
       <div
-        className="absolute bottom-0 left-0 right-0 z-20 px-0 pb-0 select-none"
+        className="absolute bottom-0 left-0 right-0 z-50 px-0 pb-0 select-none"
         data-action-btn="true"
         style={{ touchAction: 'none', bottom: 'var(--playbar-gap)' }}
       >
@@ -1000,7 +1023,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
             </div>
 
             <div className="overflow-y-auto flex-1 px-3 md:px-4 py-2 space-y-2.5 min-h-[100px]">
-              {commentsLoading && <div className="text-center text-gray-400 py-4">Loading...</div>}
+              {commentsLoading && comments.length === 0 && <div className="text-center text-gray-400 py-4">Loading...</div>}
               {!commentsLoading && comments.length === 0 && (
                 <div className="text-center text-gray-400 py-6">No comments yet. Be first!</div>
               )}

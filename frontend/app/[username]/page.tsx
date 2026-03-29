@@ -2,10 +2,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, getThumbUrl, getVideoUrl } from '@/lib/api';
+import { hasAuthToken } from '@/lib/auth';
 import { User, Video } from '@/lib/store';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import Cookies from 'js-cookie';
+import { AiOutlineEye } from 'react-icons/ai';
 
 export default function UserProfilePage() {
   const params = useParams();
@@ -25,7 +26,7 @@ export default function UserProfilePage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
+  const isLoggedIn = () => mounted && hasAuthToken();
 
   useEffect(() => {
     if (!username) return;
@@ -207,11 +208,16 @@ export default function UserProfilePage() {
             : (
               <div className="grid grid-cols-3 gap-1">
                 {videos.map((v) => (
-                  <Link key={v.id} href={`/?v=${v.id}`} className="aspect-[9/16] bg-[#1F2030] rounded-md overflow-hidden relative block">
+                  <Link key={v.id} href={`/?v=${v.id}&u=${encodeURIComponent(profile.username)}`} className="aspect-[9/16] bg-[#1F2030] rounded-md overflow-hidden relative block">
                     {v.thumbnail_url
                       ? <img src={getThumbUrl(v.thumbnail_url)} className="w-full h-full object-cover" alt={v.title} />
                       : <video src={getVideoUrl(v.video_url)} className="w-full h-full object-cover" muted />
                     }
+                    {v.is_watched && (
+                      <div className="absolute top-1 left-1 bg-black/60 rounded-full p-1" title="Watched">
+                        <AiOutlineEye className="text-white" size={14} />
+                      </div>
+                    )}
                     <div className="absolute bottom-0 left-0 right-0 p-1 bg-gradient-to-t from-black/80 to-transparent">
                       <p className="text-white text-xs line-clamp-1">{v.title}</p>
                     </div>

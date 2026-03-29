@@ -5,7 +5,7 @@ import { Video } from '@/lib/store';
 import { useAuthExpired } from '@/lib/useAuthExpired';
 import AuthModal from '@/components/AuthModal';
 import VideoCard from '@/components/VideoCard';
-import { AiFillHeart, AiOutlineComment } from 'react-icons/ai';
+import { AiFillHeart, AiOutlineComment, AiOutlineEye } from 'react-icons/ai';
 import Link from 'next/link';
 
 // Mini video card for the grid - plays on hover
@@ -60,6 +60,13 @@ function VideoGridItem({ video, onClick }: { video: Video; onClick: () => void }
       {!video.thumbnail_url && !hovered && (
         <div className="absolute inset-0 bg-gradient-to-b from-[#2D2F3E] to-[#1F2030] flex items-center justify-center">
           <span className="text-4xl">🎬</span>
+        </div>
+      )}
+
+      {/* Watched eye icon */}
+      {!hovered && video.is_watched && (
+        <div className="absolute top-1 left-1 bg-black/60 rounded-full p-1 z-10" title="Watched">
+          <AiOutlineEye className="text-white" size={14} />
         </div>
       )}
 

@@ -3,10 +3,11 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getThumbUrl, getVideoUrl } from '@/lib/api';
 import { decodeJwtPayload } from '@/lib/jwt';
+import { clearLegacyAuthCookie, getAuthToken } from '@/lib/auth';
 import { useAuthStore } from '@/lib/store';
-import Cookies from 'js-cookie';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
+import { AiOutlineEye } from 'react-icons/ai';
 
 export default function ProfilePage() {
   const { user, setAuth, clearAuth } = useAuthStore();
@@ -20,7 +21,7 @@ export default function ProfilePage() {
   const router = useRouter();
 
   useEffect(() => {
-    const token = Cookies.get('photcot_token');
+    const token = getAuthToken();
     if (!token) { router.push('/'); return; }
 
     const loadProfile = async () => {
@@ -63,7 +64,7 @@ export default function ProfilePage() {
   }, [router]);
 
   const handleLogout = () => {
-    Cookies.remove('photcot_token');
+    clearLegacyAuthCookie();
     clearAuth();
     window.dispatchEvent(new CustomEvent('photcot:auth-changed'));
     toast.success('Logged out');
@@ -196,9 +197,14 @@ export default function ProfilePage() {
             videos.length === 0
               ? <div className="text-center text-gray-400 py-10"><p className="text-4xl mb-2"></p><p>No videos yet</p></div>
               : <div className="grid grid-cols-3 gap-1">{videos.map((v: any) => (
-                  <Link href={`/?v=${v.id}`} key={v.id} className="aspect-[9/16] bg-[#1F2030] rounded-md overflow-hidden relative block">
+                  <Link href={`/?v=${v.id}&u=${encodeURIComponent(profile.username)}`} key={v.id} className="aspect-[9/16] bg-[#1F2030] rounded-md overflow-hidden relative block">
                     {v.thumbnail_url ? <img src={getThumbUrl(v.thumbnail_url)} className="w-full h-full object-cover" alt=""/> : <div className="w-full h-full flex items-center justify-center"><span className="text-2xl"></span></div>}
                     <div className="absolute bottom-1 left-1 text-white text-xs bg-black/70 px-1 rounded"> {v.view_count}</div>
+                    {v.is_watched && (
+                      <div className="absolute top-1 right-1 bg-black/60 rounded-full p-1" title="Watched">
+                        <AiOutlineEye className="text-white" size={14} />
+                      </div>
+                    )}
                   </Link>
                 ))}</div>
           )}

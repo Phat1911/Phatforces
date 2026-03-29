@@ -2,9 +2,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { hasAuthToken } from '@/lib/auth';
 import toast from 'react-hot-toast';
 import { AiOutlineCloudUpload } from 'react-icons/ai';
-import Cookies from 'js-cookie';
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -13,11 +13,12 @@ export default function UploadPage() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const router = useRouter();
 
   // Auth guard
   useEffect(() => {
-    if (!Cookies.get('photcot_token')) {
+    if (!hasAuthToken()) {
       router.push('/');
     }
   }, [router]);
@@ -41,6 +42,18 @@ export default function UploadPage() {
     e.preventDefault();
     const f = e.dataTransfer.files[0];
     if (f) handleFile(f);
+  };
+
+  const handleVideoMetadataLoaded = () => {
+    if (videoRef.current) {
+      const duration = videoRef.current.duration;
+      if (duration > 60) {
+        toast.error('Video must be 1 minute or shorter');
+        setFile(null);
+        setPreview('');
+        if (preview) URL.revokeObjectURL(preview);
+      }
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -80,12 +93,12 @@ export default function UploadPage() {
             className="border-2 border-dashed border-[#2D2F3E] rounded-xl p-10 text-center cursor-pointer hover:border-[#FE2C55] transition-colors"
           >
             {preview ? (
-              <video src={preview} className="max-h-64 mx-auto rounded-lg" controls />
+              <video ref={videoRef} src={preview} className="max-h-64 mx-auto rounded-lg" controls onLoadedMetadata={handleVideoMetadataLoaded} />
             ) : (
               <div className="flex flex-col items-center gap-3 text-gray-400">
                 <AiOutlineCloudUpload size={48} />
                 <p className="font-semibold">Drop video here or click to upload</p>
-                <p className="text-sm">MP4, WebM, MOV up to 500MB</p>
+                <p className="text-sm">MP4, WebM, MOV up to 500MB, max 1 minute</p>
               </div>
             )}
             <input ref={fileRef} type="file" accept="video/*" className="hidden" onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />

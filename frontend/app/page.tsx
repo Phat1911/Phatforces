@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useFeedStore, type Video } from '@/lib/store';
 import { videoController } from '@/lib/videoController';
@@ -8,7 +8,7 @@ import VideoCard from '@/components/VideoCard';
 import Sidebar from '@/components/Sidebar';
 import BottomNav from '@/components/BottomNav';
 import AuthModal from '@/components/AuthModal';
-import Cookies from 'js-cookie';
+import { getAuthToken, hasAuthToken } from '@/lib/auth';
 
 // Only this many VideoCard components are mounted in the DOM at once.
 // Cards outside this window are replaced with an empty placeholder div
@@ -17,6 +17,7 @@ const WINDOW_SIZE = 7;
 const WINDOW_HALF = Math.floor(WINDOW_SIZE / 2); // 3
 
 function HomePage() {
+  const router = useRouter();
   const { videos, setVideos, appendVideos, currentIndex, setCurrentIndex } = useFeedStore();
   const [loading, setLoading] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
@@ -28,6 +29,16 @@ function HomePage() {
   // Using a ref (not state) avoids triggering extra renders during the load sequence.
   const deepLinkVideoRef = useRef<import('@/lib/store').Video | null>(null);
   const deepLinkCommentRef = useRef<string | null>(null);
+  // Profile zone: when opening from a user's profile, feed is locked to that
+  // creator's videos in sequential order (no recommender/infinite feed).
+  const profileZoneRef = useRef<{ active: boolean; username: string | null }>({
+    active: false,
+    username: null,
+  });
+  const [profileZone, setProfileZone] = useState<{ active: boolean; username: string | null }>({
+    active: false,
+    username: null,
+  });
   // Set to true while a ?v= deep link fetch is in-flight so the tab-change effect
   // skips its own fetchVideos(reset) call and lets the deep link handle the load.
   const deepLinkPendingRef = useRef(false);
@@ -35,7 +46,7 @@ function HomePage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
+  const isLoggedIn = () => mounted && hasAuthToken();
 
   // Deep link handler: ?v=<video_id>
   // Prefetch the target video into deepLinkVideoRef so fetchVideos can prepend it
@@ -44,9 +55,57 @@ function HomePage() {
   useEffect(() => {
     const videoId = searchParams.get('v');
     const commentId = searchParams.get('c');
+    const profileUsernameRaw = searchParams.get('u');
+    const profileUsername = profileUsernameRaw?.startsWith('@')
+      ? profileUsernameRaw.slice(1)
+      : profileUsernameRaw;
     if (!videoId || !mounted) return;
     deepLinkCommentRef.current = commentId;
-    const token = Cookies.get('photcot_token');
+    if (profileUsername) {
+      const cleanUsername = profileUsername.trim();
+      if (!cleanUsername) return;
+      deepLinkPendingRef.current = true;
+      api.get(`/users/${encodeURIComponent(cleanUsername)}`)
+        .then((userRes) => api.get(`/u/${userRes.data.id}/videos`))
+        .then((videosRes) => {
+          const creatorVideos: Video[] = videosRes.data.videos || [];
+          if (creatorVideos.length === 0) {
+            profileZoneRef.current = { active: false, username: null };
+            setProfileZone({ active: false, username: null });
+            return;
+          }
+          profileZoneRef.current = { active: true, username: cleanUsername };
+          setProfileZone({ active: true, username: cleanUsername });
+          setVideos(creatorVideos);
+          const targetIndex = creatorVideos.findIndex((v) => v.id === videoId);
+          const nextIndex = targetIndex >= 0 ? targetIndex : 0;
+          setCurrentIndex(nextIndex);
+          const container = document.getElementById('feed-container');
+          if (container) {
+            container.scrollTop = nextIndex * container.clientHeight;
+          }
+        })
+        .catch(() => {
+          profileZoneRef.current = { active: false, username: null };
+          setProfileZone({ active: false, username: null });
+        })
+        .finally(() => {
+          deepLinkPendingRef.current = false;
+        });
+
+      // Remove deep link params once zone is initialized.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('v');
+      url.searchParams.delete('c');
+      url.searchParams.delete('u');
+      window.history.replaceState({}, '', url.toString());
+      return;
+    }
+
+    // If no profile-zone marker, ensure normal global feed behavior.
+    profileZoneRef.current = { active: false, username: null };
+    setProfileZone({ active: false, username: null });
+    const token = getAuthToken();
     const endpoint = token ? `/videos/${videoId}` : `/feed/video/${videoId}`;
     // Remove ?v= from URL immediately so back/forward navigation stays clean
     const url = new URL(window.location.href);
@@ -57,15 +116,18 @@ function HomePage() {
     api.get(endpoint)
       .then(res => {
         const video = res.data.id ? res.data : null;
-        deepLinkPendingRef.current = false;
         if (video) {
           deepLinkVideoRef.current = video;
-          // Trigger a fresh feed load - the deep link video will be prepended
+          // Trigger a fresh feed load - the deep link video will be prepended.
+          // Keep deepLinkPendingRef=true until fetchVideos sets videos+scroll
+          // so IntersectionObserver cannot overwrite currentIndex during setup.
           setCurrentIndex(0);
           const container = document.getElementById('feed-container');
           if (container) container.scrollTop = 0;
           loadingRef.current = false; // unblock in case tab-change already locked it
           fetchVideos(tab, true);
+        } else {
+          deepLinkPendingRef.current = false;
         }
       })
       .catch(() => { deepLinkPendingRef.current = false; });
@@ -75,12 +137,13 @@ function HomePage() {
   }, [mounted, searchParams]);
 
   const fetchVideos = useCallback(async (feedTab: string, reset = false) => {
+    if (profileZoneRef.current.active) return;
     if (loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
     try {
       let endpoint: string;
-      const token = Cookies.get('photcot_token');
+      const token = getAuthToken();
 
       if (feedTab === 'following') {
         if (!token) {
@@ -115,14 +178,25 @@ function HomePage() {
         if (dlv) {
           const deduped = newVideos.filter(v => v.id !== dlv.id);
           setVideos([dlv, ...deduped]);
+          // Force index 0 and scroll reset AFTER videos state is updated
+          // to prevent IntersectionObserver from overwriting currentIndex
+          // before the deep-link comment panel opens (race condition fix).
+          setCurrentIndex(0);
+          requestAnimationFrame(() => {
+            const container = document.getElementById('feed-container');
+            if (container) container.scrollTop = 0;
+            // Release the IntersectionObserver block only after scroll reset
+            deepLinkPendingRef.current = false;
+          });
         } else {
           setVideos(newVideos);
+          deepLinkPendingRef.current = false;
         }
         followingPage.current = 2;
       } else if (newVideos.length > 0) {
         appendVideos(newVideos);
         // Always advance page cursor for following/public (server queue handles foryou)
-        if (feedTab !== 'foryou' || !Cookies.get('photcot_token')) {
+        if (feedTab !== 'foryou' || !hasAuthToken()) {
           followingPage.current += 1;
         }
       }
@@ -140,6 +214,7 @@ function HomePage() {
   useEffect(() => {
     if (!mounted) return;
     if (deepLinkPendingRef.current) return;
+    if (profileZoneRef.current.active) return;
     setCurrentIndex(0);
     const container = document.getElementById('feed-container');
     if (container) container.scrollTop = 0;
@@ -151,6 +226,7 @@ function HomePage() {
   // finishes - catches the case where the user reaches the end exactly
   // while a fetch was in-flight (loadingRef blocked it, now it's free).
   useEffect(() => {
+    if (profileZoneRef.current.active) return;
     if (videos.length > 0 && currentIndex >= videos.length - 3 && !loadingRef.current) {
       fetchVideos(tab);
     }
@@ -167,6 +243,9 @@ function HomePage() {
 
     const observer = new IntersectionObserver(
       (entries) => {
+        // Block IntersectionObserver from overwriting currentIndex while
+        // a deep-link is being set up (prevents race condition with comment panel)
+        if (deepLinkPendingRef.current) return;
         entries.forEach((entry) => {
           if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
             const el = entry.target as HTMLElement;
@@ -251,18 +330,53 @@ function HomePage() {
       <Sidebar onAuthRequired={() => setShowAuth(true)} />
       <div className="flex-1 flex flex-col">
         <div className="absolute top-0 left-0 right-0 z-20 flex justify-center gap-8 pt-4 pb-2 bg-gradient-to-b from-black/60 to-transparent pointer-events-none md:pointer-events-auto md:static md:bg-transparent md:justify-start md:px-4">
-          <button
-            className={`font-semibold text-base pointer-events-auto transition-colors ${tab === 'foryou' ? 'text-white border-b-2 border-white pb-1' : 'text-gray-400 hover:text-white'}`}
-            onClick={() => { videoController.stopAll(); setTab('foryou'); }}
-          >
-            For You
-          </button>
-          <button
-            className={`font-semibold text-base pointer-events-auto transition-colors ${tab === 'following' ? 'text-white border-b-2 border-white pb-1' : 'text-gray-400 hover:text-white'}`}
-            onClick={() => { if (!isLoggedIn()) { setShowAuth(true); } else { videoController.stopAll(); setTab('following'); } }}
-          >
-            Following
-          </button>
+          {profileZone.active ? (
+            <div className="w-full max-w-[420px] mx-auto pointer-events-auto flex items-center justify-between px-3 py-2 rounded-xl bg-black/35 border border-white/10 backdrop-blur-sm">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.12em] text-gray-300">Creator Zone</p>
+                <p className="text-sm font-semibold text-white">@{profileZone.username}</p>
+              </div>
+              <button
+                onClick={() => {
+                  const username = profileZone.username;
+                  if (!username) return;
+                  router.push(`/${encodeURIComponent(username)}`);
+                }}
+                className="text-xs font-semibold text-white border border-white/25 px-3 py-1.5 rounded-full hover:bg-white/10 transition-colors"
+              >
+                Back to profile
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                className={`font-semibold text-base pointer-events-auto transition-colors ${tab === 'foryou' ? 'text-white border-b-2 border-white pb-1' : 'text-gray-400 hover:text-white'}`}
+                onClick={() => {
+                  profileZoneRef.current = { active: false, username: null };
+                  setProfileZone({ active: false, username: null });
+                  videoController.stopAll();
+                  setTab('foryou');
+                }}
+              >
+                For You
+              </button>
+              <button
+                className={`font-semibold text-base pointer-events-auto transition-colors ${tab === 'following' ? 'text-white border-b-2 border-white pb-1' : 'text-gray-400 hover:text-white'}`}
+                onClick={() => {
+                  if (!isLoggedIn()) {
+                    setShowAuth(true);
+                  } else {
+                    profileZoneRef.current = { active: false, username: null };
+                    setProfileZone({ active: false, username: null });
+                    videoController.stopAll();
+                    setTab('following');
+                  }
+                }}
+              >
+                Following
+              </button>
+            </>
+          )}
         </div>
         <div id="feed-container" className="video-feed-container flex-1">
           {videos.length === 0 && !loading && !isLoggedIn() && (

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
@@ -94,6 +95,13 @@ func (h *VideoHandler) Upload(c *gin.Context) {
 	durationOut, _ := exec.Command("ffprobe", "-v", "error", "-show_entries",
 		"format=duration", "-of", "default=noprint_wrappers=1:nokey=1", outPath).Output()
 	duration, _ := strconv.ParseFloat(strings.TrimSpace(string(durationOut)), 64)
+
+	// BUSINESS RULE: Block videos longer than 1 minute (60 seconds)
+	if duration > 60 {
+		os.RemoveAll(videoDir)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "video must be 1 minute or shorter"})
+		return
+	}
 
 	videoURL := fmt.Sprintf("/uploads/%s/video.mp4", videoID)
 	if _, statErr := os.Stat(outPath); os.IsNotExist(statErr) {
@@ -484,6 +492,32 @@ func (h *VideoHandler) GetUserVideos(c *gin.Context) {
 	limit := 20
 	offset := (page - 1) * limit
 
+	// Get current viewer ID from JWT (optional - public endpoint, parse manually)
+	var currentUserID string
+	{
+		var tokenStr string
+		if header := c.GetHeader("Authorization"); header != "" && strings.HasPrefix(header, "Bearer ") {
+			tokenStr = strings.TrimPrefix(header, "Bearer ")
+		}
+		if tokenStr == "" {
+			if cookie, err := c.Cookie("photcot_token"); err == nil && cookie != "" {
+				tokenStr = cookie
+			}
+		}
+		if tokenStr != "" && h.cfg.JWTSecret != "" {
+			token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+				return []byte(h.cfg.JWTSecret), nil
+			})
+			if err == nil {
+				if m, ok := token.Claims.(jwt.MapClaims); ok {
+					if uid, ok2 := m["user_id"].(string); ok2 {
+						currentUserID = uid
+					}
+				}
+			}
+		}
+	}
+
 	rows, err := h.db.Query(`
 		SELECT v.id, v.user_id, v.title, v.video_url, v.thumbnail_url, v.duration,
 			v.view_count, v.like_count, v.comment_count, v.hashtags, v.created_at,
@@ -507,6 +541,13 @@ func (h *VideoHandler) GetUserVideos(c *gin.Context) {
 			&a.Username, &a.DisplayName, &a.AvatarURL, &a.IsVerified)
 		a.ID = v.UserID
 		v.Author = &a
+		// Check if current viewer has watched this video
+		if currentUserID != "" {
+			var watchCount int
+			h.db.QueryRow(`SELECT COUNT(*) FROM video_views WHERE user_id = $1 AND video_id = $2`,
+				currentUserID, v.ID).Scan(&watchCount)
+			v.IsWatched = watchCount > 0
+		}
 		videos = append(videos, v)
 	}
 	c.JSON(http.StatusOK, gin.H{"videos": videos, "page": page})

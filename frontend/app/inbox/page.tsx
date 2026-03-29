@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import toast from 'react-hot-toast';
-import Cookies from 'js-cookie';
 import { api, getThumbUrl } from '@/lib/api';
+import { getAuthToken, hasAuthToken } from '@/lib/auth';
 import { decodeJwtPayload } from '@/lib/jwt';
 
 interface Peer {
@@ -49,14 +49,14 @@ function InboxPageContent() {
   }, [searchParams]);
 
   const myUserID = useMemo(() => {
-    const token = Cookies.get('photcot_token');
+    const token = getAuthToken();
     if (!token) return '';
     const payload = decodeJwtPayload(token);
     const id = payload?.user_id;
     return typeof id === 'string' ? id : '';
   }, [mounted]);
 
-  const isLoggedIn = () => mounted && !!Cookies.get('photcot_token');
+  const isLoggedIn = () => mounted && hasAuthToken();
 
   const fetchConversation = useCallback(async (opts?: { showLoading?: boolean; silent?: boolean }) => {
     const showLoading = opts?.showLoading ?? true;

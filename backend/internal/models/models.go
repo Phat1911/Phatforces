@@ -34,6 +34,7 @@ type Video struct {
 	Hashtags     []string  `json:"hashtags"`
 	IsLiked      bool      `json:"is_liked,omitempty"`
 	IsSaved      bool      `json:"is_saved,omitempty"`
+	IsWatched    bool      `json:"is_watched,omitempty"`
 	SaveCount    int       `json:"save_count"`
 	IsPublished  bool      `json:"is_published"`
 	CreatedAt    time.Time `json:"created_at"`
