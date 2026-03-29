@@ -5,13 +5,16 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --mobile-bottom-nav-height: calc(56px + env(safe-area-inset-bottom));
-  --real-gap: calc(56px + env(safe-area-inset-bottom) + 3px);
-  --mobile-playbar-height: 4px;
-  --playbar-gap: 0px;
-  --video-info-bottom-offset: calc(var(--mobile-bottom-nav-height) + var(--mobile-playbar-height));
-  --video-info-min-height: 5rem;
-  --video-actions-bottom-offset: calc(var(--mobile-bottom-nav-height) + var(--mobile-playbar-height) + var(--video-info-min-height));
+  --nav-h: calc(56px + env(safe-area-inset-bottom, 0px));
+  --bar-h: 4px;
+  --info-min-h: 5rem;
+  /* derived */
+  --mobile-bottom-nav-height: var(--nav-h);
+  --mobile-playbar-height: var(--bar-h);
+  --playbar-gap: var(--nav-h);
+  --video-info-bottom-offset: calc(var(--nav-h) + var(--bar-h));
+  --video-info-min-height: var(--info-min-h);
+  --video-actions-bottom-offset: calc(var(--nav-h) + var(--bar-h) + var(--info-min-h));
 }
 
 body {
@@ -37,11 +40,11 @@ body {
 /* On desktop (md+), no bottom nav - subtract header height */
 @media (min-width: 768px) {
   :root {
-    --mobile-bottom-nav-height: 0px;
+    --nav-h: 0px;
+    --bar-h: 0px;
+    --info-min-h: 0px;
     --desktop-header-height: 48px;
-    --mobile-playbar-height: 0px;
     --video-info-bottom-offset: 0.5rem;
-    --video-info-min-height: 0px;
     --video-actions-bottom-offset: 4rem;
   }
 

@@ -232,6 +232,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       setIsSeeking(false);
       setShowTime(false);
       setPaused(false);
+      setDescriptionExpanded(false);
       if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
     }
     return () => { if (viewTimerRef.current) clearTimeout(viewTimerRef.current); };
@@ -617,6 +618,11 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
     if ((e.target as HTMLElement).closest('[data-mute-btn]')) return;
     if ((e.target as HTMLElement).closest('[data-action-btn]')) return;
 
+    if (descriptionExpanded) {
+      setDescriptionExpanded(false);
+      return;
+    }
+
     const now = Date.now();
     if (now - lastTapRef.current < 300) {
       // Double tap - like
@@ -815,8 +821,8 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
           src={videoSrc}
           loop
           playsInline
-          className="max-h-screen max-w-full object-contain"
-          style={{ maxWidth: '420px', width: '100%' }}
+          className="h-full w-full object-cover"
+          style={{ maxWidth: '420px', position: 'absolute', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)' }}
         />
       ) : (
         <div className="w-full max-w-sm aspect-[9/16] bg-gradient-to-br from-[#1F2030] to-[#2D2F3E] flex items-center justify-center rounded-lg">
@@ -844,14 +850,6 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
         </div>
       )}
 
-      {/* Mute button */}
-      <button
-        data-mute-btn="true"
-        onClick={toggleMute}
-        className="absolute top-[44%] right-4 z-50 w-10 h-10 bg-black/40 backdrop-blur-sm border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-black/60 transition-all shadow-lg"
-      >
-        {muted ? <BsVolumeMute size={18} /> : <BsVolumeUp size={18} />}
-      </button>
 
       {/* Seekable Play Bar */}
       <div
@@ -894,7 +892,18 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       </div>
 
       {/* Bottom info */}
-      <div className="absolute left-0 right-0 px-4 pt-3 pb-1 pr-24 md:pr-4" style={{ bottom: 'var(--video-info-bottom-offset)', minHeight: 'var(--video-info-min-height)', background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)' }}>
+      <div
+        className="absolute left-0 right-0 px-4 pt-3 pb-2 md:pr-4"
+        style={{
+          bottom: 'var(--video-info-bottom-offset)',
+          minHeight: 'var(--video-info-min-height)',
+          paddingRight: descriptionExpanded ? '1rem' : '6rem',
+          background: descriptionExpanded
+            ? 'rgba(0,0,0,0.93)'
+            : 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)',
+          zIndex: descriptionExpanded ? 45 : 'auto',
+        }}
+      >
         <Link
           href={`/${video.author?.username}`}
           className="flex items-center gap-2 mb-2"
@@ -910,40 +919,36 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
           {video.author?.is_verified && <span className="text-[#FE2C55] text-xs font-bold">✓</span>}
         </Link>
         {video.title && (
-          <p className="text-sm text-white font-semibold drop-shadow-lg line-clamp-2 mb-1 leading-snug">{video.title}</p>
+          <p className={`text-sm text-white font-semibold drop-shadow-lg mb-1 leading-snug ${descriptionExpanded ? '' : 'line-clamp-2'}`}>
+            {video.title}
+          </p>
         )}
-        {video.description && (
-          <div 
-            onClick={(e) => { 
-              e.stopPropagation(); 
-              setDescriptionExpanded(!descriptionExpanded); 
-            }}
-            className={`cursor-pointer transition-all duration-200 ${descriptionExpanded ? 'mb-2' : ''}`}
+        {video.description ? (
+          <div
+            onClick={(e) => { e.stopPropagation(); setDescriptionExpanded(!descriptionExpanded); }}
+            className="cursor-pointer mb-1"
           >
             {descriptionExpanded ? (
-              <p className="text-sm text-white drop-shadow-lg mb-1 leading-snug whitespace-pre-wrap max-h-[40vh] overflow-y-auto">
+              <p className="text-sm text-white drop-shadow-lg leading-snug whitespace-pre-wrap max-h-[35vh] overflow-y-auto">
                 {video.description}
+                <span className="text-gray-400 text-xs ml-2">Collapse</span>
               </p>
             ) : (
-              <p className="text-sm text-white drop-shadow-lg mb-1 leading-snug">
-                {video.description.length > 80 ? (
-                  <>
-                    {video.description.slice(0, 80)}
-                    <span className="text-gray-300">...See more</span>
-                  </>
-                ) : (
-                  video.description
-                )}
+              <p className="text-sm text-white drop-shadow-lg leading-snug line-clamp-1">
+                {video.description.length > 60
+                  ? <>{video.description.slice(0, 60)}<span className="text-gray-300"> ...See more</span></>
+                  : video.description
+                }
               </p>
             )}
           </div>
-        )}
+        ) : null}
         {video.hashtags?.length > 0 && (
-          <p className="text-xs font-bold" style={{ color: '#ff6b8a' }}>
-            {video.hashtags.slice(0, 4).map((h: string) => `#${h}`).join(' ')}
+          <p className="text-xs font-bold mb-1" style={{ color: '#ff6b8a' }}>
+            {(descriptionExpanded ? video.hashtags : video.hashtags.slice(0, 4)).map((h: string) => `#${h}`).join(' ')}
           </p>
         )}
-        <div className="flex items-center gap-1 mt-1.5 text-xs text-gray-300">
+        <div className="flex items-center gap-1 text-xs text-gray-300">
           <BsMusicNote size={10} className="text-white" />
           <span className="truncate max-w-[160px]">Original sound - @{video.author?.username}</span>
         </div>
@@ -1027,6 +1032,19 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
             <AiOutlineShareAlt size={26} className="text-white drop-shadow" />
           </div>
           <span className="text-xs font-bold text-white drop-shadow">{video.share_count > 0 ? fmt(video.share_count) : 'Share'}</span>
+        </button>
+
+        {/* Mute */}
+        <button
+          data-mute-btn="true"
+          data-action-btn="true"
+          onClick={toggleMute}
+          className="flex flex-col items-center gap-0.5 group"
+        >
+          <div className="w-12 h-12 rounded-full flex items-center justify-center bg-black/30 backdrop-blur-sm border border-white/10 shadow-lg group-hover:scale-110 transition-transform">
+            {muted ? <BsVolumeMute size={22} className="text-white drop-shadow" /> : <BsVolumeUp size={22} className="text-white drop-shadow" />}
+          </div>
+          <span className="text-xs font-bold text-white drop-shadow">{muted ? 'Muted' : 'Sound'}</span>
         </button>
       </div>
 
