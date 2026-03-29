@@ -40,21 +40,25 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            set -e
             ACR="photcotregistry.azurecr.io"
             REPO="/home/hong_phat/photcot"
             ENV_FILE="$REPO/backend/.env"
 
             echo "${{ secrets.ACR_PASSWORD }}" | docker login $ACR -u "${{ secrets.ACR_USERNAME }}" --password-stdin
 
-            # --- Stop ALL old containers regardless of name scheme ---
+            # --- Pull images FIRST ---
+            docker pull $ACR/photcot-backend:latest || { echo "pull backend failed"; exit 1; }
+            docker pull $ACR/photcot-frontend:latest || { echo "pull frontend failed"; exit 1; }
+
+            # --- Stop old containers ---
             for c in backend photcot-backend frontend photcot-frontend nginx photcot-nginx; do
               docker stop $c 2>/dev/null || true
               docker rm   $c 2>/dev/null || true
             done
+            fuser -k 8080/tcp 2>/dev/null || true
+            sleep 2
 
-            # --- Backend (host network so it can reach postgres/redis on localhost) ---
-            docker pull $ACR/photcot-backend:latest
+            # --- Backend ---
             docker run -d --name backend --restart unless-stopped \
               --network host \
               --env-file "$ENV_FILE" \
@@ -62,8 +66,7 @@ jobs:
               -v "$REPO/backend/uploads:/app/uploads" \
               $ACR/photcot-backend:latest
 
-            # --- Frontend (host network, port 3000) ---
-            docker pull $ACR/photcot-frontend:latest
+            # --- Frontend ---
             docker run -d --name frontend --restart unless-stopped \
               --network host \
               -e NEXT_PUBLIC_API_URL=https://api.phatforces.me/api/v1 \
