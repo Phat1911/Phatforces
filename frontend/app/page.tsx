@@ -307,6 +307,17 @@ function HomePage() {
     return () => window.removeEventListener('photcot:auth-expired', handler);
   }, []);
 
+  useEffect(() => {
+    const handler = () => {
+      profileZoneRef.current = { active: false, username: null };
+      setProfileZone({ active: false, username: null });
+      videoController.stopAll();
+      setTab('foryou');
+    };
+    window.addEventListener('photcot:go-home', handler);
+    return () => window.removeEventListener('photcot:go-home', handler);
+  }, []);
+
   if (!mounted) {
     return (
       <div className="flex h-[100dvh] bg-[#161823]">

@@ -855,7 +855,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
       <button
         data-mute-btn="true"
         onClick={toggleMute}
-        className="absolute top-4 right-4 z-50 w-10 h-10 bg-black/40 backdrop-blur-sm border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-black/60 transition-all shadow-lg"
+        className="absolute top-16 right-4 z-50 w-10 h-10 bg-black/40 backdrop-blur-sm border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-black/60 transition-all shadow-lg"
       >
         {muted ? <BsVolumeMute size={18} /> : <BsVolumeUp size={18} />}
       </button>

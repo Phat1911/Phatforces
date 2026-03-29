@@ -89,9 +89,11 @@ export default function BottomNav({ onAuthRequired }: Props) {
     if (pathname === '/') {
       e.preventDefault();
       videoController.stopAll();
+      window.dispatchEvent(new CustomEvent('photcot:go-home'));
       const container = document.getElementById('feed-container');
       if (container) container.scrollTop = 0;
     }
+    // else: normal Link navigation to '/' resets to foryou by default
   };
 
   return (
