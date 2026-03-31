@@ -821,6 +821,7 @@ export default function VideoCard({ video, isActive, onAuthRequired, targetComme
           src={videoSrc}
           loop
           playsInline
+          poster={video.thumbnail_url ? getThumbUrl(video.thumbnail_url) : undefined}
           className="h-full w-full object-cover"
           style={{ maxWidth: '420px', position: 'absolute', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)' }}
         />

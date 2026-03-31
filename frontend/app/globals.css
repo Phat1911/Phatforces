@@ -54,7 +54,7 @@ body {
 }
 
 .video-item {
-  height: 100%;
+  height: calc(100dvh - var(--nav-h));
   scroll-snap-align: start;
   position: relative;
   display: flex;
