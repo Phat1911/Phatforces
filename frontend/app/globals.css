@@ -11,10 +11,10 @@
   /* derived */
   --mobile-bottom-nav-height: var(--nav-h);
   --mobile-playbar-height: var(--bar-h);
-  --playbar-gap: var(--nav-h);
-  --video-info-bottom-offset: calc(var(--nav-h) + var(--bar-h));
+  --playbar-gap: 0px;
+  --video-info-bottom-offset: var(--bar-h);
   --video-info-min-height: var(--info-min-h);
-  --video-actions-bottom-offset: calc(var(--nav-h) + var(--bar-h) + var(--info-min-h));
+  --video-actions-bottom-offset: calc(var(--bar-h) + var(--info-min-h));
 }
 
 body {
